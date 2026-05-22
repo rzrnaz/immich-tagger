@@ -319,8 +319,9 @@ public sealed class MainForm : Form
                 ? pickerRootPath
                 : null;
             Text = description;
-            Width = 900;
-            Height = 650;
+            Width = 940;
+            Height = 760;
+            MinimumSize = new Size(760, 620);
             MinimizeBox = false;
             MaximizeBox = true;
             StartPosition = FormStartPosition.CenterParent;
@@ -339,7 +340,7 @@ public sealed class MainForm : Form
             main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            main.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
 
             var help = new Label
             {
@@ -376,11 +377,17 @@ public sealed class MainForm : Form
             var buttonPanel = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.RightToLeft,
-                Dock = DockStyle.Top,
-                AutoSize = true,
+                Dock = DockStyle.Fill,
+                AutoSize = false,
+                Height = 48,
                 WrapContents = false,
-                Margin = new Padding(0, 10, 0, 0)
+                Padding = new Padding(0, 8, 0, 0),
+                Margin = new Padding(0)
             };
+            _okButton.Height = 34;
+            _cancelButton.Height = 34;
+            _okButton.Margin = new Padding(8, 0, 0, 0);
+            _cancelButton.Margin = new Padding(8, 0, 0, 0);
             buttonPanel.Controls.Add(_cancelButton);
             buttonPanel.Controls.Add(_okButton);
 

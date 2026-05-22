@@ -424,7 +424,7 @@ public sealed class PhotoAiScanner
             {
                 if (endpoint.IsFallback)
                 {
-                    Report(progress, "FALLBACK", $"Primary model failed; trying fallback {endpoint.Model} at {endpoint.OllamaBaseUrl}.", imagePath);
+                    Report(progress, "FALLBACK", $"Primary model failed; trying fallback {endpoint.Model} at {endpoint.OllamaBaseUrl}. This is recoverable; scan will continue if fallback succeeds.", imagePath);
                 }
 
                 TimeSpan timeout = endpoint.IsFallback ? TimeSpan.FromMinutes(5) : TimeSpan.FromMinutes(1);
