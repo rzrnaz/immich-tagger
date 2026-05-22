@@ -55,8 +55,12 @@ try
         bool force = args.Any(a => string.Equals(a, "--force", StringComparison.OrdinalIgnoreCase));
         bool writeJson = true;
         bool writeXmp = args.Any(a => string.Equals(a, "--write-xmp", StringComparison.OrdinalIgnoreCase));
-        bool overwriteJson = args.Any(a => string.Equals(a, "--overwrite-json", StringComparison.OrdinalIgnoreCase));
-        bool overwriteXmp = args.Any(a => string.Equals(a, "--overwrite-xmp", StringComparison.OrdinalIgnoreCase));
+        bool overwriteSidecars = args.Any(a =>
+            string.Equals(a, "--overwrite-sidecars", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(a, "--overwrite-json", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(a, "--overwrite-xmp", StringComparison.OrdinalIgnoreCase));
+        bool overwriteJson = overwriteSidecars;
+        bool overwriteXmp = overwriteSidecars;
         bool addTags = args.Any(a => string.Equals(a, "--add-tags", StringComparison.OrdinalIgnoreCase));
         bool dryRun = args.Any(a => string.Equals(a, "--dry-run", StringComparison.OrdinalIgnoreCase));
         int? limit = ReadIntOption(args, "--limit");
@@ -176,8 +180,9 @@ static void PrintUsage()
     Console.WriteLine("  --recursive                Include subfolders.");
     Console.WriteLine("  --force                    Reprocess images even if PhotoAI sidecar exists.");
     Console.WriteLine("  --write-xmp                Also write Immich-compatible .xmp sidecars.");
-    Console.WriteLine("  --overwrite-json          Replace existing .photoai.json sidecars when reprocessing.");
-    Console.WriteLine("  --overwrite-xmp           Replace existing .jpg.xmp sidecars.");
+    Console.WriteLine("  --overwrite-sidecars      Replace existing .photoai.json and .jpg.xmp sidecars as one bundled pair.");
+    Console.WriteLine("  --overwrite-json          Legacy alias for --overwrite-sidecars.");
+    Console.WriteLine("  --overwrite-xmp           Legacy alias for --overwrite-sidecars.");
     Console.WriteLine("  --add-tags                Write tags/nouns into XMP keyword/tag metadata fields.");
     Console.WriteLine("  --dry-run                  Preview what would happen without calling Ollama or writing files.");
     Console.WriteLine("  --limit <number>           Process only the first N images.");

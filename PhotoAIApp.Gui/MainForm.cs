@@ -17,8 +17,7 @@ public sealed class MainForm : Form
     private readonly NumericUpDown _limitNumeric = new() { Minimum = 0, Maximum = 100000, Value = 0, Width = 100 };
     private readonly CheckBox _recursiveCheckBox = new() { Text = "Subfolders", AutoSize = true };
     private readonly CheckBox _forceCheckBox = new() { Text = "Scan Existing", Checked = true, AutoSize = true };
-    private readonly CheckBox _overwriteJsonCheckBox = new() { Text = "Overwrite JSON", Checked = true, AutoSize = true };
-    private readonly CheckBox _overwriteXmpCheckBox = new() { Text = "Overwrite XMP", Checked = false, AutoSize = true };
+    private readonly CheckBox _overwriteSidecarsCheckBox = new() { Text = "Overwrite JSON + XMP", Checked = true, AutoSize = true };
     private readonly CheckBox _addTagsCheckBox = new() { Text = "Add Tags", Checked = false, AutoSize = true };
     private readonly CheckBox _dryRunCheckBox = new() { Text = "Dry Run", Checked = true, AutoSize = true };
     private readonly Button _browseLibraryRootButton = new() { Text = "Browse...", Width = 120, Height = 34 };
@@ -190,13 +189,11 @@ public sealed class MainForm : Form
 
         ConfigureOptionCheckBox(_recursiveCheckBox, 165);
         ConfigureOptionCheckBox(_forceCheckBox, 190);
-        ConfigureOptionCheckBox(_overwriteJsonCheckBox, 210);
-        ConfigureOptionCheckBox(_overwriteXmpCheckBox, 230);
+        ConfigureOptionCheckBox(_overwriteSidecarsCheckBox, 280);
 
         row1.Controls.Add(_recursiveCheckBox);
         row1.Controls.Add(_forceCheckBox);
-        row1.Controls.Add(_overwriteJsonCheckBox);
-        row1.Controls.Add(_overwriteXmpCheckBox);
+        row1.Controls.Add(_overwriteSidecarsCheckBox);
 
         var row2 = new FlowLayoutPanel
         {
@@ -713,8 +710,8 @@ public sealed class MainForm : Form
                     Force = _forceCheckBox.Checked,
                     WriteJson = true,
                     WriteXmp = true,
-                    OverwriteJson = _overwriteJsonCheckBox.Checked,
-                    OverwriteXmp = _overwriteXmpCheckBox.Checked,
+                    OverwriteJson = _overwriteSidecarsCheckBox.Checked,
+                    OverwriteXmp = _overwriteSidecarsCheckBox.Checked,
                     AddTags = _addTagsCheckBox.Checked,
                     DryRun = _dryRunCheckBox.Checked,
                     OllamaBaseUrl = _ollamaTextBox.Text.Trim(),
@@ -805,8 +802,7 @@ public sealed class MainForm : Form
         _refreshModelsButton.Enabled = !running && CurrentModelPreference() != PhotoAiModelPreference.UnraidMiniCpmOnly;
         _recursiveCheckBox.Enabled = !running;
         _forceCheckBox.Enabled = !running;
-        _overwriteJsonCheckBox.Enabled = !running;
-        _overwriteXmpCheckBox.Enabled = !running;
+        _overwriteSidecarsCheckBox.Enabled = !running;
         _addTagsCheckBox.Enabled = !running;
         _dryRunCheckBox.Enabled = !running;
         _limitNumeric.Enabled = !running;

@@ -52,7 +52,7 @@ public sealed class PhotoAiScanner
 
         Report(progress, "RUN START", $"Scan root: {rootPath}");
         Report(progress, "INFO", $"Safety root: {safetyRootPath}");
-        Report(progress, "INFO", $"Subfolders: {options.Recursive}; Overwrite: {options.Force}; Overwrite JSON: {options.OverwriteJson}; Overwrite XMP: {options.OverwriteXmp}; Add tags: {options.AddTags}; Dry run: {options.DryRun}; Model preference: {options.ModelPreference}; Primary: {primaryEndpoint.Model} @ {primaryEndpoint.OllamaBaseUrl}; Fallback: {(modelEndpoints.Length > 1 ? $"{modelEndpoints[1].Model} @ {modelEndpoints[1].OllamaBaseUrl}" : "none")}");
+        Report(progress, "INFO", $"Subfolders: {options.Recursive}; Scan Existing: {options.Force}; Overwrite sidecars JSON+XMP: {options.OverwriteSidecars}; Add tags: {options.AddTags}; Dry run: {options.DryRun}; Model preference: {options.ModelPreference}; Primary: {primaryEndpoint.Model} @ {primaryEndpoint.OllamaBaseUrl}; Fallback: {(modelEndpoints.Length > 1 ? $"{modelEndpoints[1].Model} @ {modelEndpoints[1].OllamaBaseUrl}" : "none")}");
 
         if (options.DryRun)
         {
@@ -69,8 +69,7 @@ public sealed class PhotoAiScanner
                 $"force={options.Force}",
                 $"write_json={options.WriteJson}",
                 $"write_xmp={options.WriteXmp}",
-                $"overwrite_json={options.OverwriteJson}",
-                $"overwrite_xmp={options.OverwriteXmp}",
+                $"overwrite_sidecars={options.OverwriteSidecars}",
                 $"add_tags={options.AddTags}",
                 $"dry_run={options.DryRun}",
                 $"ollama={primaryEndpoint.OllamaBaseUrl}",
@@ -162,11 +161,31 @@ public sealed class PhotoAiScanner
             }
 
             string photoAiSidecarPath = GetPhotoAiSidecarPath(fullImagePath);
+            string xmpPath = GetImmichXmpSidecarPath(fullImagePath);
+            bool jsonExists = File.Exists(photoAiSidecarPath);
+            bool xmpExists = File.Exists(xmpPath);
 
-            if (File.Exists(photoAiSidecarPath) && !options.Force)
+            if (jsonExists && !options.Force)
             {
                 summary.Skipped++;
-                Report(progress, "SKIP", $"SKIP existing sidecar: {Path.GetFileName(fullImagePath)}", fullImagePath);
+                Report(progress, "SKIP", $"SKIP existing PhotoAI sidecar and Scan Existing is off: {Path.GetFileName(fullImagePath)}", fullImagePath);
+                continue;
+            }
+
+            PhotoAiSidecarWritePlan writePlan = PlanSidecarWrites(options, jsonExists, xmpExists);
+            if (writePlan.ShouldSkipWithoutAnalysis)
+            {
+                summary.Skipped++;
+                if (options.WriteJson && jsonExists)
+                {
+                    summary.JsonWriteSkipped++;
+                }
+                if (options.WriteXmp && xmpExists)
+                {
+                    summary.XmpWriteSkipped++;
+                }
+
+                Report(progress, "SKIP", $"SKIP {displayIndex}/{imagePaths.Count}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call is needed: {fullImagePath}", fullImagePath);
                 continue;
             }
 
@@ -192,10 +211,7 @@ public sealed class PhotoAiScanner
                     RawResponse = rawResponse
                 };
 
-                bool jsonExists = File.Exists(photoAiSidecarPath);
-                bool canWriteJson = options.WriteJson && (!jsonExists || options.OverwriteJson);
-
-                if (canWriteJson)
+                if (writePlan.CanWriteJson)
                 {
                     string json = JsonSerializer.Serialize(
                         sidecar,
@@ -208,7 +224,7 @@ public sealed class PhotoAiScanner
                 else if (options.WriteJson)
                 {
                     summary.JsonWriteSkipped++;
-                    Report(progress, "JSON SKIPPED", $"JSON SKIPPED: existing file and Overwrite JSON is off: {photoAiSidecarPath}", fullImagePath);
+                    Report(progress, "JSON SKIPPED", $"JSON SKIPPED: existing file and sidecar overwrite is off: {photoAiSidecarPath}", fullImagePath);
                 }
 
                 if (options.WriteXmp)
@@ -230,10 +246,7 @@ public sealed class PhotoAiScanner
                     }
                     else
                     {
-                        string xmpPath = GetImmichXmpSidecarPath(fullImagePath);
-                        bool xmpExists = File.Exists(xmpPath);
-
-                        if (!xmpExists || options.OverwriteXmp)
+                        if (writePlan.CanWriteXmp)
                         {
                             string xmp = BuildImmichXmp(analysis, options.AddTags);
                             await File.WriteAllTextAsync(xmpPath, xmp, cancellationToken);
@@ -243,7 +256,7 @@ public sealed class PhotoAiScanner
                         else
                         {
                             summary.XmpWriteSkipped++;
-                            Report(progress, "XMP SKIPPED", $"XMP SKIPPED: existing file and Overwrite XMP is off: {xmpPath}", fullImagePath);
+                            Report(progress, "XMP SKIPPED", $"XMP SKIPPED: existing file and sidecar overwrite is off: {xmpPath}", fullImagePath);
                         }
                     }
                 }
@@ -350,9 +363,26 @@ public sealed class PhotoAiScanner
                 continue;
             }
 
+            PhotoAiSidecarWritePlan writePlan = PlanSidecarWrites(options, hasPhotoAiSidecar, hasXmpSidecar);
+            if (writePlan.ShouldSkipWithoutAnalysis)
+            {
+                summary.Skipped++;
+                if (options.WriteJson && hasPhotoAiSidecar)
+                {
+                    summary.WouldSkipJsonSidecar++;
+                }
+                if (options.WriteXmp && hasXmpSidecar)
+                {
+                    summary.WouldSkipXmpSidecar++;
+                }
+
+                Report(progress, "WOULD SKIP", $"WOULD SKIP {displayIndex}/{imagePaths.Count}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call would be made: {fullImagePath}", fullImagePath);
+                continue;
+            }
+
             summary.WouldProcess++;
-            bool wouldWriteJson = options.WriteJson && (!hasPhotoAiSidecar || options.OverwriteJson);
-            bool wouldWriteXmp = options.WriteXmp && (!hasXmpSidecar || options.OverwriteXmp);
+            bool wouldWriteJson = writePlan.CanWriteJson;
+            bool wouldWriteXmp = writePlan.CanWriteXmp;
 
             if (wouldWriteJson)
             {
@@ -380,7 +410,7 @@ public sealed class PhotoAiScanner
             }
             else if (options.WriteJson)
             {
-                Report(progress, "WOULD SKIP", $"  WOULD SKIP JSON existing file, Overwrite JSON off: {photoAiSidecarPath}", fullImagePath);
+                Report(progress, "WOULD SKIP", $"  WOULD SKIP JSON existing file, sidecar overwrite off: {photoAiSidecarPath}", fullImagePath);
             }
 
             if (wouldWriteXmp)
@@ -389,7 +419,7 @@ public sealed class PhotoAiScanner
             }
             else if (options.WriteXmp)
             {
-                Report(progress, "WOULD SKIP", $"  WOULD SKIP XMP existing file, Overwrite XMP off: {xmpPath}", fullImagePath);
+                Report(progress, "WOULD SKIP", $"  WOULD SKIP XMP existing file, sidecar overwrite off: {xmpPath}", fullImagePath);
             }
         }
     }
@@ -418,6 +448,17 @@ public sealed class PhotoAiScanner
             new PhotoAiModelEndpoint(primaryUrl, primaryModel, IsFallback: false),
             new PhotoAiModelEndpoint(unraidUrl, unraidModel, IsFallback: true)
         ];
+    }
+
+    public static PhotoAiSidecarWritePlan PlanSidecarWrites(
+        PhotoAiScanOptions options,
+        bool jsonExists,
+        bool xmpExists)
+    {
+        bool overwriteSidecars = options.OverwriteSidecars;
+        bool canWriteJson = options.WriteJson && (!jsonExists || overwriteSidecars);
+        bool canWriteXmp = options.WriteXmp && (!xmpExists || overwriteSidecars);
+        return new PhotoAiSidecarWritePlan(overwriteSidecars, canWriteJson, canWriteXmp);
     }
 
     private static string CleanRequiredValue(string? value, string fallback)

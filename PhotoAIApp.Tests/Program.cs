@@ -47,4 +47,51 @@ AssertEqual("http://unraid:11434", unraidPlan[0].OllamaBaseUrl, "Unraid endpoint
 AssertEqual("minicpm-v:latest", unraidPlan[0].Model, "Unraid endpoint model should be MiniCPM-V");
 Assert(!unraidPlan[0].IsFallback, "Unraid-only endpoint should not be marked as fallback");
 
+var noWritableOutputsPlan = PhotoAiScanner.PlanSidecarWrites(
+    new PhotoAiScanOptions
+    {
+        WriteJson = true,
+        WriteXmp = true,
+        OverwriteJson = false,
+        OverwriteXmp = false
+    },
+    jsonExists: true,
+    xmpExists: true);
+
+AssertEqual(false, noWritableOutputsPlan.CanWriteJson, "Existing JSON should not be writable when sidecar overwrite is off");
+AssertEqual(false, noWritableOutputsPlan.CanWriteXmp, "Existing XMP should not be writable when sidecar overwrite is off");
+AssertEqual(false, noWritableOutputsPlan.ShouldAnalyze, "Scanner should not call the model when neither JSON nor XMP can be written");
+AssertEqual(true, noWritableOutputsPlan.ShouldSkipWithoutAnalysis, "Scanner should skip before LLM when all requested sidecars already exist and overwrite is off");
+
+var legacyJsonOverwritePlan = PhotoAiScanner.PlanSidecarWrites(
+    new PhotoAiScanOptions
+    {
+        WriteJson = true,
+        WriteXmp = true,
+        OverwriteJson = true,
+        OverwriteXmp = false
+    },
+    jsonExists: true,
+    xmpExists: true);
+
+AssertEqual(true, legacyJsonOverwritePlan.EffectiveOverwriteSidecars, "Legacy OverwriteJson should enable bundled sidecar overwrite");
+AssertEqual(true, legacyJsonOverwritePlan.CanWriteJson, "Bundled overwrite should make JSON writable");
+AssertEqual(true, legacyJsonOverwritePlan.CanWriteXmp, "Bundled overwrite should make XMP writable too, preventing fresh XMP with stale JSON");
+AssertEqual(true, legacyJsonOverwritePlan.ShouldAnalyze, "Scanner should analyze when bundled sidecar overwrite is enabled");
+
+var legacyXmpOverwritePlan = PhotoAiScanner.PlanSidecarWrites(
+    new PhotoAiScanOptions
+    {
+        WriteJson = true,
+        WriteXmp = true,
+        OverwriteJson = false,
+        OverwriteXmp = true
+    },
+    jsonExists: true,
+    xmpExists: true);
+
+AssertEqual(true, legacyXmpOverwritePlan.EffectiveOverwriteSidecars, "Legacy OverwriteXmp should enable bundled sidecar overwrite");
+AssertEqual(true, legacyXmpOverwritePlan.CanWriteJson, "Bundled overwrite should make JSON writable when XMP overwrite was requested");
+AssertEqual(true, legacyXmpOverwritePlan.CanWriteXmp, "Bundled overwrite should make XMP writable");
+
 Console.WriteLine("PhotoAIApp.Tests passed.");

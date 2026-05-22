@@ -10,6 +10,7 @@ public sealed class PhotoAiScanOptions
     public bool WriteXmp { get; init; } = true;
     public bool OverwriteJson { get; init; }
     public bool OverwriteXmp { get; init; }
+    public bool OverwriteSidecars => OverwriteJson || OverwriteXmp;
     public bool AddTags { get; init; }
     public bool DryRun { get; init; }
     public string OllamaBaseUrl { get; init; } = PhotoAiDefaults.QwenPcOllamaBaseUrl;
@@ -19,6 +20,15 @@ public sealed class PhotoAiScanOptions
     public string FallbackModel { get; init; } = PhotoAiDefaults.UnraidModel;
     public PhotoAiPauseController? PauseController { get; init; }
     public int? Limit { get; init; }
+}
+
+public sealed record PhotoAiSidecarWritePlan(
+    bool EffectiveOverwriteSidecars,
+    bool CanWriteJson,
+    bool CanWriteXmp)
+{
+    public bool ShouldAnalyze => CanWriteJson || CanWriteXmp;
+    public bool ShouldSkipWithoutAnalysis => !ShouldAnalyze;
 }
 
 public enum PhotoAiModelPreference
