@@ -757,6 +757,9 @@ public sealed class MainForm : Form
                 AppendLog($"XMP written:         {summary.XmpWritten}");
                 AppendLog($"JSON write skipped:  {summary.JsonWriteSkipped}");
                 AppendLog($"XMP write skipped:   {summary.XmpWriteSkipped}");
+                AppendLog($"Model failures:      {summary.ModelFailures}");
+                AppendLog($"Fallback attempts:   {summary.FallbackAttempts}");
+                AppendLog($"Fallback successes:  {summary.FallbackSucceeded}");
                 AppendLog($"Anomaly log:         {summary.RunLogPath}");
             }
         }

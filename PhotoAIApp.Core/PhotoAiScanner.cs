@@ -164,7 +164,7 @@ public sealed class PhotoAiScanner
 
             try
             {
-                AnalysisResult analysisResult = await AnalyzeImageWithFallbackAsync(fullImagePath, modelEndpoints, progress, cancellationToken);
+                AnalysisResult analysisResult = await AnalyzeImageWithFallbackAsync(fullImagePath, modelEndpoints, summary, progress, cancellationToken);
                 string rawResponse = analysisResult.RawResponse;
                 PhotoAnalysis? analysis = TryParsePhotoAnalysis(rawResponse);
                 analysis = EnrichAnalysisTags(analysis);
@@ -260,7 +260,7 @@ public sealed class PhotoAiScanner
         }
 
         Report(progress, "RUN COMPLETE", "Scan complete.");
-        Report(progress, "SUMMARY", $"Completed: {summary.Completed}; Skipped: {summary.Skipped}; Failed: {summary.Failed}; Parse/XMP skipped: {summary.ParseFailed}; XMP written: {summary.XmpWritten}");
+        Report(progress, "SUMMARY", $"Files processed: {summary.Completed}; XMP files successfully written: {summary.XmpWritten}; Skipped: {summary.Skipped}; Failed: {summary.Failed}; Parse/XMP skipped: {summary.ParseFailed}; Model failures: {summary.ModelFailures}; Fallback attempts: {summary.FallbackAttempts}; Fallback successes: {summary.FallbackSucceeded}");
 
         await AppendRunLogAsync(runLogPath, "RUN COMPLETE", new[]
         {
@@ -271,7 +271,10 @@ public sealed class PhotoAiScanner
             $"parse_xmp_skipped={summary.ParseFailed}",
             $"xmp_written={summary.XmpWritten}",
             $"json_write_skipped={summary.JsonWriteSkipped}",
-            $"xmp_write_skipped={summary.XmpWriteSkipped}"
+            $"xmp_write_skipped={summary.XmpWriteSkipped}",
+            $"model_failures={summary.ModelFailures}",
+            $"fallback_attempts={summary.FallbackAttempts}",
+            $"fallback_successes={summary.FallbackSucceeded}"
         }, cancellationToken);
 
         return summary;
@@ -412,6 +415,7 @@ public sealed class PhotoAiScanner
     private async Task<AnalysisResult> AnalyzeImageWithFallbackAsync(
         string imagePath,
         IReadOnlyList<PhotoAiModelEndpoint> endpoints,
+        PhotoAiScanSummary summary,
         IProgress<PhotoAiScanProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -424,15 +428,22 @@ public sealed class PhotoAiScanner
             {
                 if (endpoint.IsFallback)
                 {
+                    summary.FallbackAttempts++;
                     Report(progress, "FALLBACK", $"Primary model failed; trying fallback {endpoint.Model} at {endpoint.OllamaBaseUrl}. This is recoverable; scan will continue if fallback succeeds.", imagePath);
                 }
 
                 TimeSpan timeout = endpoint.IsFallback ? TimeSpan.FromMinutes(5) : TimeSpan.FromMinutes(1);
                 string rawResponse = await AnalyzeImageAsync(imagePath, endpoint.OllamaBaseUrl, endpoint.Model, progress, cancellationToken, timeout);
+                if (endpoint.IsFallback)
+                {
+                    summary.FallbackSucceeded++;
+                }
+
                 return new AnalysisResult(rawResponse, endpoint);
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
+                summary.ModelFailures++;
                 primaryException ??= ex;
 
                 if (i == endpoints.Count - 1)
@@ -500,7 +511,7 @@ public sealed class PhotoAiScanner
             throw new FileNotFoundException($"Image file not found: {imagePath}", imagePath);
         }
 
-        Report(progress, "OLLAMA", $"Sending image to Ollama: {Path.GetFileName(imagePath)}", imagePath);
+        Report(progress, "OLLAMA", $"Sent image to {model} on {FormatServerAddress(ollamaBaseUrl)}: {Path.GetFileName(imagePath)}", imagePath);
 
         byte[] imageBytes = await File.ReadAllBytesAsync(imagePath, cancellationToken);
         string imageBase64 = Convert.ToBase64String(imageBytes);
@@ -1186,6 +1197,16 @@ Other rules:
     private static string NormalizeDirectoryOrFilePath(string path)
     {
         return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static string FormatServerAddress(string ollamaBaseUrl)
+    {
+        if (Uri.TryCreate(ollamaBaseUrl, UriKind.Absolute, out Uri? uri))
+        {
+            return uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port}";
+        }
+
+        return ollamaBaseUrl;
     }
 
     private static void Report(IProgress<PhotoAiScanProgress>? progress, string eventName, string message, string? imagePath = null)

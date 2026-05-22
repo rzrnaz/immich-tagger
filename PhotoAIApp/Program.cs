@@ -107,6 +107,9 @@ try
             Console.WriteLine($"XMP written:         {summary.XmpWritten}");
             Console.WriteLine($"JSON write skipped:  {summary.JsonWriteSkipped}");
             Console.WriteLine($"XMP write skipped:   {summary.XmpWriteSkipped}");
+            Console.WriteLine($"Model failures:      {summary.ModelFailures}");
+            Console.WriteLine($"Fallback attempts:   {summary.FallbackAttempts}");
+            Console.WriteLine($"Fallback successes:  {summary.FallbackSucceeded}");
             Console.WriteLine($"Anomaly log:         {summary.RunLogPath}");
         }
 

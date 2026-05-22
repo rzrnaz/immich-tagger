@@ -133,4 +133,7 @@ public sealed class PhotoAiScanSummary
     public int ExistingXmpSidecars { get; set; }
     public int JsonWriteSkipped { get; set; }
     public int XmpWriteSkipped { get; set; }
+    public int ModelFailures { get; set; }
+    public int FallbackAttempts { get; set; }
+    public int FallbackSucceeded { get; set; }
 }
