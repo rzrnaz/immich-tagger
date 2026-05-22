@@ -79,7 +79,7 @@ public sealed class MainForm : Form
         ApplyModelPreferenceToInputs();
 
         _browseLibraryRootButton.Click += (_, _) => BrowseForFolder(_libraryRootTextBox, "Choose Immich library root / safety root");
-        _browseSelectedFolderButton.Click += (_, _) => BrowseForFolder(_selectedFolderTextBox, "Choose folder to scan");
+        _browseSelectedFolderButton.Click += (_, _) => BrowseForFolder(_selectedFolderTextBox, "Choose folder to scan", _libraryRootTextBox.Text);
         _runButton.Click += async (_, _) => await RunScanAsync();
         _pauseButton.Click += (_, _) => TogglePause();
         _cancelButton.Click += (_, _) => _cancellationTokenSource?.Cancel();
@@ -274,19 +274,226 @@ public sealed class MainForm : Form
         return panel;
     }
 
-    private static void BrowseForFolder(TextBox target, string description)
+    private static void BrowseForFolder(TextBox target, string description, string? fallbackPath = null)
     {
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = description,
-            UseDescriptionForTitle = true,
-            SelectedPath = Directory.Exists(target.Text) ? target.Text : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
-            ShowNewFolderButton = false
-        };
+        string initialPath = FirstExistingDirectory(target.Text, fallbackPath, Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
 
-        if (dialog.ShowDialog() == DialogResult.OK)
+        using var dialog = new SafeFolderPickerForm(description, initialPath);
+        if (dialog.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.SelectedPath))
         {
             target.Text = dialog.SelectedPath;
+        }
+    }
+
+    private static string FirstExistingDirectory(params string?[] candidates)
+    {
+        foreach (string? candidate in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) && Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return Environment.GetFolderPath(Environment.SpecialFolder.MyComputer);
+    }
+
+    private sealed class SafeFolderPickerForm : Form
+    {
+        private readonly TreeView _tree = new() { Dock = DockStyle.Fill, HideSelection = false };
+        private readonly TextBox _pathTextBox = new() { Dock = DockStyle.Fill, ReadOnly = true };
+        private readonly Button _okButton = new() { Text = "Select", Width = 110, DialogResult = DialogResult.OK };
+        private readonly Button _cancelButton = new() { Text = "Cancel", Width = 110, DialogResult = DialogResult.Cancel };
+        private readonly Button _upButton = new() { Text = "Up", Width = 90 };
+        private readonly Button _refreshButton = new() { Text = "Refresh", Width = 110 };
+
+        public string SelectedPath { get; private set; }
+
+        public SafeFolderPickerForm(string description, string initialPath)
+        {
+            Text = description;
+            Width = 900;
+            Height = 650;
+            MinimizeBox = false;
+            MaximizeBox = true;
+            StartPosition = FormStartPosition.CenterParent;
+            Font = new Font("Segoe UI", 10F);
+            SelectedPath = initialPath;
+            AcceptButton = _okButton;
+            CancelButton = _cancelButton;
+
+            var main = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 4,
+                Padding = new Padding(12)
+            };
+            main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var help = new Label
+            {
+                Text = "Safe folder picker: select a folder only. This picker does not expose shell delete/rename commands.",
+                AutoSize = true,
+                Dock = DockStyle.Top,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+
+            var pathPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 3,
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+            pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            pathPanel.Controls.Add(_pathTextBox, 0, 0);
+            pathPanel.Controls.Add(_upButton, 1, 0);
+            pathPanel.Controls.Add(_refreshButton, 2, 0);
+
+            var buttonPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.RightToLeft,
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                WrapContents = false,
+                Margin = new Padding(0, 10, 0, 0)
+            };
+            buttonPanel.Controls.Add(_cancelButton);
+            buttonPanel.Controls.Add(_okButton);
+
+            main.Controls.Add(help, 0, 0);
+            main.Controls.Add(pathPanel, 0, 1);
+            main.Controls.Add(_tree, 0, 2);
+            main.Controls.Add(buttonPanel, 0, 3);
+            Controls.Add(main);
+
+            _tree.BeforeExpand += (_, e) => PopulateChildren(e.Node);
+            _tree.AfterSelect += (_, e) => SetSelectedPath(NodePath(e.Node));
+            _upButton.Click += (_, _) => NavigateUp();
+            _refreshButton.Click += (_, _) => RefreshCurrentNode();
+            _okButton.Click += (_, _) => SelectedPath = _pathTextBox.Text;
+
+            LoadInitialPath(initialPath);
+        }
+
+        private void LoadInitialPath(string initialPath)
+        {
+            _tree.Nodes.Clear();
+            string path = Directory.Exists(initialPath) ? initialPath : FirstExistingDirectory(initialPath);
+            TreeNode node = CreateNode(path);
+            _tree.Nodes.Add(node);
+            PopulateChildren(node);
+            node.Expand();
+            _tree.SelectedNode = node;
+            SetSelectedPath(path);
+        }
+
+        private void NavigateUp()
+        {
+            string current = _pathTextBox.Text;
+            DirectoryInfo? parent = Directory.GetParent(current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (parent is null || !parent.Exists)
+            {
+                return;
+            }
+
+            LoadInitialPath(parent.FullName);
+        }
+
+        private void RefreshCurrentNode()
+        {
+            if (_tree.SelectedNode is null)
+            {
+                return;
+            }
+
+            _tree.SelectedNode.Nodes.Clear();
+            _tree.SelectedNode.Nodes.Add(new TreeNode("Loading..."));
+            PopulateChildren(_tree.SelectedNode);
+            _tree.SelectedNode.Expand();
+        }
+
+        private void SetSelectedPath(string path)
+        {
+            SelectedPath = path;
+            _pathTextBox.Text = path;
+            _okButton.Enabled = Directory.Exists(path);
+        }
+
+        private static TreeNode CreateNode(string path)
+        {
+            string trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string label = string.IsNullOrWhiteSpace(trimmed) ? path : Path.GetFileName(trimmed);
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                label = path;
+            }
+
+            var node = new TreeNode(label) { Tag = path };
+            if (HasChildDirectories(path))
+            {
+                node.Nodes.Add(new TreeNode("Loading..."));
+            }
+
+            return node;
+        }
+
+        private static string NodePath(TreeNode? node)
+        {
+            return node?.Tag as string ?? string.Empty;
+        }
+
+        private static void PopulateChildren(TreeNode? node)
+        {
+            if (node is null)
+            {
+                return;
+            }
+
+            string path = NodePath(node);
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+            {
+                return;
+            }
+
+            if (node.Nodes.Count == 1 && node.Nodes[0].Tag is null && node.Nodes[0].Text == "Loading...")
+            {
+                node.Nodes.Clear();
+            }
+            else if (node.Nodes.Count > 0)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (string directory in Directory.EnumerateDirectories(path).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+                {
+                    node.Nodes.Add(CreateNode(directory));
+                }
+            }
+            catch
+            {
+                // Ignore folders Windows cannot enumerate; this picker is only for safe selection.
+            }
+        }
+
+        private static bool HasChildDirectories(string path)
+        {
+            try
+            {
+                return Directory.EnumerateDirectories(path).Any();
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 

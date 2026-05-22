@@ -28,6 +28,7 @@ The release zip contains:
   - Qwen PC preferred with Unraid MiniCPM-V fallback.
   - Unraid MiniCPM-V only with no fallback.
 - Pause/resume for long runs, separate from Stop/cancel.
+- Safe in-app folder picker that only selects folders and does not expose Windows shell delete/rename commands.
 
 ## Safety model
 
