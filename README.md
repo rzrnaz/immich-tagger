@@ -2,6 +2,21 @@
 
 PhotoAIApp is a Windows/.NET tool for generating PhotoAI audit sidecars and Immich-compatible XMP sidecars for selected photo folders.
 
+## Current release
+
+Release page:
+
+https://github.com/rzrnaz/PhotoAIApp/releases/tag/v0.1.0
+
+Self-contained Windows zip:
+
+https://github.com/rzrnaz/PhotoAIApp/releases/download/v0.1.0/PhotoAIApp_Windows_EXE_SelfContained.zip
+
+The release zip contains:
+
+- GUI executable: `publish\PhotoAIApp-gui-win-x64-self-contained\PhotoAIApp.Gui.exe`
+- CLI executable: `publish\PhotoAIApp-cli-win-x64-self-contained\PhotoAIApp.exe`
+
 ## Current features
 
 - WinForms GUI for selecting an Immich/library safety root and a specific folder to scan.
