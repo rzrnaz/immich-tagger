@@ -277,8 +277,11 @@ public sealed class MainForm : Form
     private static void BrowseForFolder(TextBox target, string description, string? fallbackPath = null)
     {
         string initialPath = FirstExistingDirectory(target.Text, fallbackPath, Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
+        string? pickerRootPath = !string.IsNullOrWhiteSpace(fallbackPath) && Directory.Exists(fallbackPath)
+            ? fallbackPath
+            : null;
 
-        using var dialog = new SafeFolderPickerForm(description, initialPath);
+        using var dialog = new SafeFolderPickerForm(description, initialPath, pickerRootPath);
         if (dialog.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.SelectedPath))
         {
             target.Text = dialog.SelectedPath;
@@ -306,11 +309,15 @@ public sealed class MainForm : Form
         private readonly Button _cancelButton = new() { Text = "Cancel", Width = 110, DialogResult = DialogResult.Cancel };
         private readonly Button _upButton = new() { Text = "Up", Width = 90 };
         private readonly Button _refreshButton = new() { Text = "Refresh", Width = 110 };
+        private readonly string? _pickerRootPath;
 
         public string SelectedPath { get; private set; }
 
-        public SafeFolderPickerForm(string description, string initialPath)
+        public SafeFolderPickerForm(string description, string initialPath, string? pickerRootPath = null)
         {
+            _pickerRootPath = !string.IsNullOrWhiteSpace(pickerRootPath) && Directory.Exists(pickerRootPath)
+                ? pickerRootPath
+                : null;
             Text = description;
             Width = 900;
             Height = 650;
@@ -337,8 +344,10 @@ public sealed class MainForm : Form
             var help = new Label
             {
                 Text = "Safe folder picker: select a folder only. This picker does not expose shell delete/rename commands.",
-                AutoSize = true,
+                AutoSize = false,
                 Dock = DockStyle.Top,
+                Height = 30,
+                AutoEllipsis = true,
                 Margin = new Padding(0, 0, 0, 8)
             };
 
@@ -346,12 +355,20 @@ public sealed class MainForm : Form
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 3,
-                AutoSize = true,
+                RowCount = 1,
+                AutoSize = false,
+                Height = 38,
                 Margin = new Padding(0, 0, 0, 8)
             };
             pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
             pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            pathPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            _pathTextBox.Margin = new Padding(0, 2, 8, 2);
+            _upButton.Dock = DockStyle.Fill;
+            _upButton.Margin = new Padding(0, 0, 8, 0);
+            _refreshButton.Dock = DockStyle.Fill;
+            _refreshButton.Margin = new Padding(0);
             pathPanel.Controls.Add(_pathTextBox, 0, 0);
             pathPanel.Controls.Add(_upButton, 1, 0);
             pathPanel.Controls.Add(_refreshButton, 2, 0);
@@ -385,13 +402,62 @@ public sealed class MainForm : Form
         private void LoadInitialPath(string initialPath)
         {
             _tree.Nodes.Clear();
-            string path = Directory.Exists(initialPath) ? initialPath : FirstExistingDirectory(initialPath);
-            TreeNode node = CreateNode(path);
-            _tree.Nodes.Add(node);
-            PopulateChildren(node);
-            node.Expand();
-            _tree.SelectedNode = node;
-            SetSelectedPath(path);
+            string selectedPath = Directory.Exists(initialPath) ? initialPath : FirstExistingDirectory(initialPath);
+            string rootPath = _pickerRootPath is not null && PhotoAiScanner.IsPathUnderRoot(selectedPath, _pickerRootPath)
+                ? _pickerRootPath
+                : selectedPath;
+
+            TreeNode rootNode = CreateNode(rootPath);
+            _tree.Nodes.Add(rootNode);
+            PopulateChildren(rootNode);
+            rootNode.Expand();
+
+            TreeNode nodeToSelect = FindOrCreatePathNode(rootNode, selectedPath) ?? rootNode;
+            _tree.SelectedNode = nodeToSelect;
+            nodeToSelect.EnsureVisible();
+            SetSelectedPath(NodePath(nodeToSelect));
+        }
+
+        private TreeNode? FindOrCreatePathNode(TreeNode rootNode, string targetPath)
+        {
+            string rootPath = NodePath(rootNode).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normalizedTarget = targetPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(rootPath, normalizedTarget, StringComparison.OrdinalIgnoreCase))
+            {
+                return rootNode;
+            }
+
+            string relative;
+            try
+            {
+                relative = Path.GetRelativePath(rootPath, normalizedTarget);
+            }
+            catch
+            {
+                return null;
+            }
+
+            if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            {
+                return null;
+            }
+
+            TreeNode current = rootNode;
+            foreach (string segment in relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                PopulateChildren(current);
+                TreeNode? next = current.Nodes.Cast<TreeNode>().FirstOrDefault(node =>
+                    string.Equals(Path.GetFileName(NodePath(node)), segment, StringComparison.OrdinalIgnoreCase));
+                if (next is null)
+                {
+                    return current;
+                }
+
+                next.Expand();
+                current = next;
+            }
+
+            return current;
         }
 
         private void NavigateUp()
@@ -399,6 +465,11 @@ public sealed class MainForm : Form
             string current = _pathTextBox.Text;
             DirectoryInfo? parent = Directory.GetParent(current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
             if (parent is null || !parent.Exists)
+            {
+                return;
+            }
+
+            if (_pickerRootPath is not null && !PhotoAiScanner.IsPathUnderRoot(parent.FullName, _pickerRootPath))
             {
                 return;
             }
