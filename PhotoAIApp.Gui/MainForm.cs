@@ -17,7 +17,7 @@ public sealed class MainForm : Form
     private readonly NumericUpDown _limitNumeric = new() { Minimum = 0, Maximum = 100000, Value = 0, Width = 100 };
     private readonly CheckBox _recursiveCheckBox = new() { Text = "Subfolders", AutoSize = true };
     private readonly CheckBox _forceCheckBox = new() { Text = "Scan Existing", Checked = true, AutoSize = true };
-    private readonly CheckBox _overwriteSidecarsCheckBox = new() { Text = "Overwrite JSON + XMP", Checked = true, AutoSize = true };
+    private readonly CheckBox _overwriteSidecarsCheckBox = new() { Text = "Overwrite XMP+", Checked = true, AutoSize = true };
     private readonly CheckBox _addTagsCheckBox = new() { Text = "Add Tags", Checked = false, AutoSize = true };
     private readonly CheckBox _dryRunCheckBox = new() { Text = "Dry Run", Checked = true, AutoSize = true };
     private readonly Button _browseLibraryRootButton = new() { Text = "Browse...", Width = 120, Height = 34 };
@@ -27,6 +27,7 @@ public sealed class MainForm : Form
     private readonly Button _pauseButton = new() { Text = "Pause", Width = 100, Height = 36, Enabled = false };
     private readonly Button _cancelButton = new() { Text = "Stop", Width = 100, Height = 36, Enabled = false };
     private readonly Button _openLogButton = new() { Text = "Open log", Width = 120, Height = 36, Enabled = false };
+    private readonly ToolTip _toolTip = new();
     private readonly TextBox _logTextBox = new()
     {
         Multiline = true,
@@ -75,6 +76,8 @@ public sealed class MainForm : Form
         _modelPreferenceComboBox.Items.Add(new ModelPreferenceItem("Unraid MiniCPM-V only (no fallback)", PhotoAiModelPreference.UnraidMiniCpmOnly));
         _modelPreferenceComboBox.SelectedIndex = 0;
         _modelPreferenceComboBox.SelectedIndexChanged += (_, _) => ApplyModelPreferenceToInputs();
+        _toolTip.SetToolTip(_forceCheckBox, "When checked, images with an existing .photoai.json can be considered for re-scan. When unchecked, existing PhotoAI JSON means skip the image.");
+        _toolTip.SetToolTip(_overwriteSidecarsCheckBox, "When checked, existing .photoai.json and .jpg.xmp sidecars are regenerated together. When unchecked, existing sidecars are protected and no-op images skip the LLM.");
         ApplyModelPreferenceToInputs();
 
         _browseLibraryRootButton.Click += (_, _) => BrowseForFolder(_libraryRootTextBox, "Choose Immich library root / safety root");
@@ -189,7 +192,7 @@ public sealed class MainForm : Form
 
         ConfigureOptionCheckBox(_recursiveCheckBox, 165);
         ConfigureOptionCheckBox(_forceCheckBox, 190);
-        ConfigureOptionCheckBox(_overwriteSidecarsCheckBox, 280);
+        ConfigureOptionCheckBox(_overwriteSidecarsCheckBox, 220);
 
         row1.Controls.Add(_recursiveCheckBox);
         row1.Controls.Add(_forceCheckBox);

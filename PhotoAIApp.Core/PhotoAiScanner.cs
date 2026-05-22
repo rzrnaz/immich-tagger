@@ -124,7 +124,10 @@ public sealed class PhotoAiScanner
             await PreviewScanAsync(imagePaths, rootPath, safetyRootPath, options, summary, progress, cancellationToken);
             summary.StopTime = DateTimeOffset.Now;
             Report(progress, "DRY RUN COMPLETE", "Preview complete. No files were written.");
-            Report(progress, "SUMMARY", $"Start: {FormatTimestamp(summary.StartTime)}; Stop: {FormatTimestamp(summary.StopTime)}; Elapsed: {FormatDuration(summary.ElapsedTime)}; Average/photo: {FormatDuration(summary.AverageTimePerProcessedPhoto)}; Would process: {summary.WouldProcess}; Would write JSON: {summary.WouldWriteJsonSidecar}; Would write XMP: {summary.WouldWriteXmpSidecar}; Would skip JSON: {summary.WouldSkipJsonSidecar}; Would skip XMP: {summary.WouldSkipXmpSidecar}; Existing JSON: {summary.ExistingJsonSidecars}; Existing XMP: {summary.ExistingXmpSidecars}; Blocked/failed: {summary.Failed}");
+            foreach (string summaryLine in BuildDryRunSummaryLines(summary))
+            {
+                Report(progress, "SUMMARY", summaryLine);
+            }
             return summary;
         }
 
@@ -284,7 +287,10 @@ public sealed class PhotoAiScanner
 
         summary.StopTime = DateTimeOffset.Now;
         Report(progress, "RUN COMPLETE", "Scan complete.");
-        Report(progress, "SUMMARY", $"Start: {FormatTimestamp(summary.StartTime)}; Stop: {FormatTimestamp(summary.StopTime)}; Elapsed: {FormatDuration(summary.ElapsedTime)}; Average/photo: {FormatDuration(summary.AverageTimePerProcessedPhoto)}; Files processed: {summary.Completed}; XMP files successfully written: {summary.XmpWritten}; Skipped: {summary.Skipped}; Failed: {summary.Failed}; Parse/XMP skipped: {summary.ParseFailed}; Model failures: {summary.ModelFailures}; Fallback attempts: {summary.FallbackAttempts}; Fallback successes: {summary.FallbackSucceeded}");
+        foreach (string summaryLine in BuildRunSummaryLines(summary))
+        {
+            Report(progress, "SUMMARY", summaryLine);
+        }
 
         await AppendRunLogAsync(runLogPath, "RUN COMPLETE", new[]
         {
@@ -1277,6 +1283,44 @@ Other rules:
         return duration.TotalHours >= 1
             ? $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}"
             : $"{duration.Minutes:00}:{duration.Seconds:00}";
+    }
+
+    private static string[] BuildRunSummaryLines(PhotoAiScanSummary summary)
+    {
+        return
+        [
+            $"Start: {FormatTimestamp(summary.StartTime)}",
+            $"Stop: {FormatTimestamp(summary.StopTime)}",
+            $"Elapsed: {FormatDuration(summary.ElapsedTime)}",
+            $"Average/photo: {FormatDuration(summary.AverageTimePerProcessedPhoto)}",
+            $"Files processed: {summary.Completed}",
+            $"XMP files successfully written: {summary.XmpWritten}",
+            $"Skipped: {summary.Skipped}",
+            $"Failed: {summary.Failed}",
+            $"Parse/XMP skipped: {summary.ParseFailed}",
+            $"Model failures: {summary.ModelFailures}",
+            $"Fallback attempts: {summary.FallbackAttempts}",
+            $"Fallback successes: {summary.FallbackSucceeded}"
+        ];
+    }
+
+    private static string[] BuildDryRunSummaryLines(PhotoAiScanSummary summary)
+    {
+        return
+        [
+            $"Start: {FormatTimestamp(summary.StartTime)}",
+            $"Stop: {FormatTimestamp(summary.StopTime)}",
+            $"Elapsed: {FormatDuration(summary.ElapsedTime)}",
+            $"Average/photo: {FormatDuration(summary.AverageTimePerProcessedPhoto)}",
+            $"Would process: {summary.WouldProcess}",
+            $"Would write JSON: {summary.WouldWriteJsonSidecar}",
+            $"Would write XMP: {summary.WouldWriteXmpSidecar}",
+            $"Would skip JSON: {summary.WouldSkipJsonSidecar}",
+            $"Would skip XMP: {summary.WouldSkipXmpSidecar}",
+            $"Existing JSON: {summary.ExistingJsonSidecars}",
+            $"Existing XMP: {summary.ExistingXmpSidecars}",
+            $"Blocked/failed: {summary.Failed}"
+        ];
     }
 
     private static void Report(IProgress<PhotoAiScanProgress>? progress, string eventName, string message, string? imagePath = null)
