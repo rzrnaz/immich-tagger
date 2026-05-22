@@ -1,0 +1,25 @@
+# Build outputs
+bin/
+obj/
+publish/
+
+# User/editor files
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python test/cache artifacts
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Logs/temp
+*.log
+*.tmp
