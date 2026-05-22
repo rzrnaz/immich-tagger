@@ -121,6 +121,7 @@ public sealed class PhotoAiScanProgress
     public string EventName { get; init; } = "";
     public string Message { get; init; } = "";
     public string? ImagePath { get; init; }
+    public PhotoAiRunProgressSnapshot? Snapshot { get; init; }
 }
 
 public sealed class PhotoAiScanSummary

@@ -28,18 +28,37 @@ public sealed class MainForm : Form
     private readonly Button _cancelButton = new() { Text = "Stop", Width = 100, Height = 36, Enabled = false };
     private readonly Button _openLogButton = new() { Text = "Open log", Width = 120, Height = 36, Enabled = false };
     private readonly ToolTip _toolTip = new();
+    private readonly Label _phaseValueLabel = CreateStatusValueLabel("Ready");
+    private readonly Label _startTimeValueLabel = CreateStatusValueLabel("n/a");
+    private readonly Label _elapsedValueLabel = CreateStatusValueLabel("00:00");
+    private readonly Label _remainingValueLabel = CreateStatusValueLabel("Estimating...");
+    private readonly Label _etaValueLabel = CreateStatusValueLabel("Estimating...");
+    private readonly Label _countsValueLabel = CreateStatusValueLabel("0 / 0");
+    private readonly ProgressBar _progressBar = new()
+    {
+        Dock = DockStyle.Fill,
+        Minimum = 0,
+        Maximum = 1000,
+        Value = 0,
+        Style = ProgressBarStyle.Continuous,
+        Height = 28
+    };
     private readonly TextBox _logTextBox = new()
     {
         Multiline = true,
         ReadOnly = true,
-        ScrollBars = ScrollBars.Both,
+        ScrollBars = ScrollBars.Vertical,
         WordWrap = false,
-        Dock = DockStyle.Fill,
+        Dock = DockStyle.Top,
+        Height = 118,
         Font = new Font("Consolas", 10F)
     };
+    private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 1000 };
+    private readonly List<string> _recentStatusLines = [];
 
     private CancellationTokenSource? _cancellationTokenSource;
     private PhotoAiPauseController? _pauseController;
+    private PhotoAiRunProgressSnapshot? _lastSnapshot;
     private string? _lastRunLogPath;
 
     public MainForm()
@@ -56,19 +75,21 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             Padding = new Padding(14)
         };
         main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         main.Controls.Add(CreatePathPanel(), 0, 0);
         main.Controls.Add(CreateOptionsPanel(), 0, 1);
         main.Controls.Add(CreateButtonPanel(), 0, 2);
-        main.Controls.Add(_logTextBox, 0, 3);
+        main.Controls.Add(CreateStatusPanel(), 0, 3);
+        main.Controls.Add(_logTextBox, 0, 4);
 
         Controls.Add(main);
 
@@ -87,6 +108,98 @@ public sealed class MainForm : Form
         _cancelButton.Click += (_, _) => _cancellationTokenSource?.Cancel();
         _openLogButton.Click += (_, _) => OpenLastRunLog();
         _refreshModelsButton.Click += async (_, _) => await RefreshModelsAsync();
+        _statusTimer.Tick += (_, _) => RefreshElapsedStatus();
+    }
+
+    private Control CreateStatusPanel()
+    {
+        var group = new GroupBox
+        {
+            Text = "Live status",
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(12, 10, 12, 12),
+            Margin = new Padding(0, 0, 0, 10)
+        };
+
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 6,
+            RowCount = 3
+        };
+        for (int i = 0; i < 6; i++)
+        {
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16.6667F));
+        }
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+
+        AddStatusPair(panel, 0, 0, "Phase", _phaseValueLabel);
+        AddStatusPair(panel, 1, 0, "Start", _startTimeValueLabel);
+        AddStatusPair(panel, 2, 0, "Elapsed", _elapsedValueLabel);
+        AddStatusPair(panel, 3, 0, "Remaining", _remainingValueLabel);
+        AddStatusPair(panel, 4, 0, "ETA", _etaValueLabel);
+        AddStatusPair(panel, 5, 0, "Files", _countsValueLabel);
+
+        panel.Controls.Add(_progressBar, 0, 1);
+        panel.SetColumnSpan(_progressBar, 6);
+
+        var hint = new Label
+        {
+            Text = "Recent status is limited to the last 5 lines below; the full anomaly log remains available after live runs.",
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
+            ForeColor = SystemColors.GrayText,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 4, 0, 0)
+        };
+        panel.Controls.Add(hint, 0, 2);
+        panel.SetColumnSpan(hint, 6);
+
+        group.Controls.Add(panel);
+        return group;
+    }
+
+    private static void AddStatusPair(TableLayoutPanel panel, int column, int row, string label, Label valueLabel)
+    {
+        var container = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = new Padding(0, 0, 10, 0)
+        };
+        container.RowStyles.Add(new RowStyle(SizeType.Absolute, 14));
+        container.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        container.Controls.Add(new Label
+        {
+            Text = label.ToUpperInvariant(),
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
+            ForeColor = SystemColors.GrayText,
+            Font = new Font("Segoe UI", 7.5F, FontStyle.Bold),
+            Margin = new Padding(0)
+        }, 0, 0);
+        container.Controls.Add(valueLabel, 0, 1);
+        panel.Controls.Add(container, column, row);
+    }
+
+    private static Label CreateStatusValueLabel(string text)
+    {
+        return new Label
+        {
+            Text = text,
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0),
+            Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+        };
     }
 
     private Control CreatePathPanel()
@@ -694,12 +807,23 @@ public sealed class MainForm : Form
 
         SetRunningState(true);
         _logTextBox.Clear();
+        _recentStatusLines.Clear();
+        _lastSnapshot = null;
+        ResetLiveStatus();
+        _statusTimer.Start();
         _lastRunLogPath = null;
         _openLogButton.Enabled = false;
         _cancellationTokenSource = new CancellationTokenSource();
         _pauseController = new PhotoAiPauseController();
 
-        var progress = new Progress<PhotoAiScanProgress>(item => AppendLog(item.Message));
+        var progress = new Progress<PhotoAiScanProgress>(item =>
+        {
+            AppendLog(item.Message);
+            if (item.Snapshot is not null)
+            {
+                ApplyProgressSnapshot(item.Snapshot);
+            }
+        });
         var scanner = new PhotoAiScanner();
 
         try
@@ -731,41 +855,10 @@ public sealed class MainForm : Form
             _lastRunLogPath = summary.RunLogPath;
             _openLogButton.Enabled = !summary.DryRun && File.Exists(_lastRunLogPath);
 
-            AppendLog("");
-            AppendLog("Scan complete.");
-            AppendLog($"Start time:          {FormatSummaryTimestamp(summary.StartTime)}");
-            AppendLog($"Stop time:           {FormatSummaryTimestamp(summary.StopTime)}");
-            AppendLog($"Elapsed time:        {FormatSummaryDuration(summary.ElapsedTime)}");
-            AppendLog($"Average/photo:       {FormatSummaryDuration(summary.AverageTimePerProcessedPhoto)}");
-            AppendLog($"Images found:        {summary.ImagesFound}");
-
-            if (summary.DryRun)
-            {
-                AppendLog("Mode:                DRY RUN / PREVIEW");
-                AppendLog($"Would process:       {summary.WouldProcess}");
-                AppendLog($"Would write JSON:    {summary.WouldWriteJsonSidecar}");
-                AppendLog($"Would write XMP:     {summary.WouldWriteXmpSidecar}");
-                AppendLog($"Would skip JSON:     {summary.WouldSkipJsonSidecar}");
-                AppendLog($"Would skip XMP:      {summary.WouldSkipXmpSidecar}");
-                AppendLog($"Existing JSON:       {summary.ExistingJsonSidecars}");
-                AppendLog($"Existing XMP:        {summary.ExistingXmpSidecars}");
-                AppendLog($"Would skip:          {summary.Skipped}");
-                AppendLog($"Would block/fail:    {summary.Failed}");
-            }
-            else
-            {
-                AppendLog($"Completed:           {summary.Completed}");
-                AppendLog($"Skipped:             {summary.Skipped}");
-                AppendLog($"Failed:              {summary.Failed}");
-                AppendLog($"Parse/XMP skipped:   {summary.ParseFailed}");
-                AppendLog($"XMP written:         {summary.XmpWritten}");
-                AppendLog($"JSON write skipped:  {summary.JsonWriteSkipped}");
-                AppendLog($"XMP write skipped:   {summary.XmpWriteSkipped}");
-                AppendLog($"Model failures:      {summary.ModelFailures}");
-                AppendLog($"Fallback attempts:   {summary.FallbackAttempts}");
-                AppendLog($"Fallback successes:  {summary.FallbackSucceeded}");
-                AppendLog($"Anomaly log:         {summary.RunLogPath}");
-            }
+            PhotoAiRunSummaryDocument summaryDocument = PhotoAiRunSummaryDocument.FromSummary(summary);
+            AppendLog("Scan complete. Summary opened in a separate window.");
+            _statusTimer.Stop();
+            ShowRunSummary(summaryDocument, summary.RunLogPath, summary.DryRun);
         }
         catch (OperationCanceledException)
         {
@@ -779,6 +872,7 @@ public sealed class MainForm : Form
         }
         finally
         {
+            _statusTimer.Stop();
             _pauseController?.Resume();
             _cancellationTokenSource.Dispose();
             _cancellationTokenSource = null;
@@ -819,7 +913,75 @@ public sealed class MainForm : Form
             return;
         }
 
-        _logTextBox.AppendText(message + Environment.NewLine);
+        _recentStatusLines.Add(message);
+        while (_recentStatusLines.Count > 5)
+        {
+            _recentStatusLines.RemoveAt(0);
+        }
+
+        _logTextBox.Lines = _recentStatusLines.ToArray();
+        _logTextBox.SelectionStart = _logTextBox.TextLength;
+        _logTextBox.ScrollToCaret();
+    }
+
+    private void ResetLiveStatus()
+    {
+        _phaseValueLabel.Text = "Starting";
+        _startTimeValueLabel.Text = "n/a";
+        _elapsedValueLabel.Text = "00:00";
+        _remainingValueLabel.Text = "Estimating...";
+        _etaValueLabel.Text = "Estimating...";
+        _countsValueLabel.Text = "0 / 0";
+        _progressBar.Style = ProgressBarStyle.Marquee;
+        _progressBar.Value = 0;
+    }
+
+    private void ApplyProgressSnapshot(PhotoAiRunProgressSnapshot snapshot)
+    {
+        if (InvokeRequired)
+        {
+            Invoke(() => ApplyProgressSnapshot(snapshot));
+            return;
+        }
+
+        _lastSnapshot = snapshot;
+        _phaseValueLabel.Text = snapshot.Phase;
+        _startTimeValueLabel.Text = FormatSummaryTimestamp(snapshot.StartedAt);
+        _elapsedValueLabel.Text = FormatSummaryDuration(snapshot.Elapsed);
+        _remainingValueLabel.Text = snapshot.EstimatedRemainingDisplay;
+        _etaValueLabel.Text = snapshot.EstimatedFinishTimeDisplay;
+
+        string total = snapshot.TotalFiles?.ToString() ?? "?";
+        _countsValueLabel.Text = $"{snapshot.FilesFinished} / {total}";
+
+        if (snapshot.IsIndeterminate || snapshot.ProgressFraction is null)
+        {
+            _progressBar.Style = ProgressBarStyle.Marquee;
+            _progressBar.Value = 0;
+        }
+        else
+        {
+            _progressBar.Style = ProgressBarStyle.Continuous;
+            int value = (int)Math.Round(Math.Clamp(snapshot.ProgressFraction.Value, 0.0, 100.0) * 10.0);
+            _progressBar.Value = Math.Clamp(value, _progressBar.Minimum, _progressBar.Maximum);
+        }
+    }
+
+    private void RefreshElapsedStatus()
+    {
+        if (_lastSnapshot is null)
+        {
+            return;
+        }
+
+        TimeSpan elapsed = DateTimeOffset.Now - _lastSnapshot.StartedAt;
+        _elapsedValueLabel.Text = FormatSummaryDuration(elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed);
+    }
+
+    private void ShowRunSummary(PhotoAiRunSummaryDocument summaryDocument, string runLogPath, bool dryRun)
+    {
+        using var form = new RunSummaryForm(summaryDocument, dryRun ? null : runLogPath);
+        form.ShowDialog(this);
     }
 
     private static string FormatSummaryTimestamp(DateTimeOffset? timestamp)
@@ -849,5 +1011,130 @@ public sealed class MainForm : Form
             FileName = _lastRunLogPath,
             UseShellExecute = true
         });
+    }
+
+    private sealed class RunSummaryForm : Form
+    {
+        private readonly PhotoAiRunSummaryDocument _summaryDocument;
+        private readonly string? _runLogPath;
+        private readonly TextBox _summaryTextBox = new()
+        {
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Both,
+            WordWrap = false,
+            Dock = DockStyle.Fill,
+            Font = new Font("Consolas", 10F)
+        };
+
+        public RunSummaryForm(PhotoAiRunSummaryDocument summaryDocument, string? runLogPath)
+        {
+            _summaryDocument = summaryDocument;
+            _runLogPath = runLogPath;
+
+            Text = summaryDocument.Title;
+            Width = 820;
+            Height = 640;
+            MinimumSize = new Size(700, 500);
+            StartPosition = FormStartPosition.CenterParent;
+            Font = new Font("Segoe UI", 10F);
+
+            var main = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                Padding = new Padding(12)
+            };
+            main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            main.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+
+            _summaryTextBox.Text = summaryDocument.PlainText;
+            main.Controls.Add(_summaryTextBox, 0, 0);
+
+            var buttons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                Padding = new Padding(0, 10, 0, 0)
+            };
+            var closeButton = new Button { Text = "Close", Width = 110, Height = 34, DialogResult = DialogResult.OK };
+            var saveTextButton = new Button { Text = "Save text...", Width = 120, Height = 34 };
+            var saveJsonButton = new Button { Text = "Save JSON...", Width = 120, Height = 34 };
+            var copyButton = new Button { Text = "Copy", Width = 100, Height = 34 };
+            var openLogButton = new Button { Text = "Open log", Width = 110, Height = 34, Enabled = !string.IsNullOrWhiteSpace(runLogPath) && File.Exists(runLogPath) };
+
+            closeButton.Margin = new Padding(8, 0, 0, 0);
+            saveTextButton.Margin = new Padding(8, 0, 0, 0);
+            saveJsonButton.Margin = new Padding(8, 0, 0, 0);
+            copyButton.Margin = new Padding(8, 0, 0, 0);
+            openLogButton.Margin = new Padding(8, 0, 0, 0);
+
+            saveTextButton.Click += (_, _) => SaveSummaryTextAs();
+            saveJsonButton.Click += (_, _) => SaveSummaryJsonAs();
+            copyButton.Click += (_, _) => Clipboard.SetText(_summaryDocument.PlainText);
+            openLogButton.Click += (_, _) => OpenRunLog();
+
+            buttons.Controls.Add(closeButton);
+            buttons.Controls.Add(saveTextButton);
+            buttons.Controls.Add(saveJsonButton);
+            buttons.Controls.Add(copyButton);
+            buttons.Controls.Add(openLogButton);
+            main.Controls.Add(buttons, 0, 1);
+
+            AcceptButton = closeButton;
+            CancelButton = closeButton;
+            Controls.Add(main);
+        }
+
+        private void SaveSummaryTextAs()
+        {
+            using var dialog = new SaveFileDialog
+            {
+                Title = "Save PhotoAI run summary text",
+                Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
+                FileName = _summaryDocument.SuggestedFileName,
+                AddExtension = true,
+                DefaultExt = "txt"
+            };
+
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                _summaryDocument.SaveTextAs(dialog.FileName);
+            }
+        }
+
+        private void SaveSummaryJsonAs()
+        {
+            using var dialog = new SaveFileDialog
+            {
+                Title = "Save PhotoAI run summary JSON",
+                Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
+                FileName = _summaryDocument.SuggestedJsonFileName,
+                AddExtension = true,
+                DefaultExt = "json"
+            };
+
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                _summaryDocument.SaveJsonAs(dialog.FileName);
+            }
+        }
+
+        private void OpenRunLog()
+        {
+            if (string.IsNullOrWhiteSpace(_runLogPath) || !File.Exists(_runLogPath))
+            {
+                MessageBox.Show(this, "No anomaly log file is available for this run.", "PhotoAI", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = _runLogPath,
+                UseShellExecute = true
+            });
+        }
     }
 }

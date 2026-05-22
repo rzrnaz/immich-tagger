@@ -50,7 +50,11 @@ public sealed class PhotoAiScanner
         PhotoAiModelEndpoint[] modelEndpoints = BuildModelEndpointPlan(options);
         PhotoAiModelEndpoint primaryEndpoint = modelEndpoints[0];
 
-        Report(progress, "RUN START", $"Scan root: {rootPath}");
+        Report(
+            progress,
+            "RUN START",
+            $"Scan root: {rootPath}",
+            snapshot: BuildProgressSnapshot(summary, PhotoAiRunState.Scanning, "Scanning folder", totalFiles: null));
         Report(progress, "INFO", $"Safety root: {safetyRootPath}");
         Report(progress, "INFO", $"Subfolders: {options.Recursive}; Scan Existing: {options.Force}; Overwrite sidecars JSON+XMP: {options.OverwriteSidecars}; Add tags: {options.AddTags}; Dry run: {options.DryRun}; Model preference: {options.ModelPreference}; Primary: {primaryEndpoint.Model} @ {primaryEndpoint.OllamaBaseUrl}; Fallback: {(modelEndpoints.Length > 1 ? $"{modelEndpoints[1].Model} @ {modelEndpoints[1].OllamaBaseUrl}" : "none")}");
 
@@ -95,7 +99,15 @@ public sealed class PhotoAiScanner
             .ToList();
 
         summary.ImagesFound = imagePaths.Count;
-        Report(progress, "IMAGES FOUND", $"Images found: {imagePaths.Count}");
+        Report(
+            progress,
+            "IMAGES FOUND",
+            $"Images found: {imagePaths.Count}",
+            snapshot: BuildProgressSnapshot(
+                summary,
+                options.DryRun ? PhotoAiRunState.DryRunning : PhotoAiRunState.Running,
+                options.DryRun ? "Dry run preview" : "Generating descriptions",
+                imagePaths.Count));
 
         if (options.Limit is > 0 && imagePaths.Count > options.Limit.Value)
         {
@@ -123,7 +135,11 @@ public sealed class PhotoAiScanner
         {
             await PreviewScanAsync(imagePaths, rootPath, safetyRootPath, options, summary, progress, cancellationToken);
             summary.StopTime = DateTimeOffset.Now;
-            Report(progress, "DRY RUN COMPLETE", "Preview complete. No files were written.");
+            Report(
+                progress,
+                "DRY RUN COMPLETE",
+                "Preview complete. No files were written.",
+                snapshot: BuildProgressSnapshot(summary, PhotoAiRunState.Completed, "Dry run complete", imagePaths.Count));
             foreach (string summaryLine in BuildDryRunSummaryLines(summary))
             {
                 Report(progress, "SUMMARY", summaryLine);
@@ -171,7 +187,12 @@ public sealed class PhotoAiScanner
             if (jsonExists && !options.Force)
             {
                 summary.Skipped++;
-                Report(progress, "SKIP", $"SKIP existing PhotoAI sidecar and Scan Existing is off: {Path.GetFileName(fullImagePath)}", fullImagePath);
+                Report(
+                    progress,
+                    "SKIP",
+                    $"SKIP existing PhotoAI sidecar and Scan Existing is off: {Path.GetFileName(fullImagePath)}",
+                    fullImagePath,
+                    BuildProgressSnapshot(summary, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
                 continue;
             }
 
@@ -188,7 +209,12 @@ public sealed class PhotoAiScanner
                     summary.XmpWriteSkipped++;
                 }
 
-                Report(progress, "SKIP", $"SKIP {displayIndex}/{imagePaths.Count}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call is needed: {fullImagePath}", fullImagePath);
+                Report(
+                    progress,
+                    "SKIP",
+                    $"SKIP {displayIndex}/{imagePaths.Count}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call is needed: {fullImagePath}",
+                    fullImagePath,
+                    BuildProgressSnapshot(summary, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
                 continue;
             }
 
@@ -265,17 +291,32 @@ public sealed class PhotoAiScanner
                 }
 
                 summary.Completed++;
+                Report(
+                    progress,
+                    "PROGRESS",
+                    $"Completed {displayIndex}/{imagePaths.Count}: {Path.GetFileName(fullImagePath)}",
+                    fullImagePath,
+                    BuildProgressSnapshot(summary, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
             }
             catch (OperationCanceledException)
             {
-                Report(progress, "CANCELLED", "Scan cancelled by user.");
+                Report(
+                    progress,
+                    "CANCELLED",
+                    "Scan cancelled by user.",
+                    snapshot: BuildProgressSnapshot(summary, PhotoAiRunState.Cancelled, "Cancelled", imagePaths.Count));
                 await AppendRunLogAsync(runLogPath, "CANCELLED", new[] { $"image={fullImagePath}" }, CancellationToken.None);
                 throw;
             }
             catch (Exception ex)
             {
                 summary.Failed++;
-                Report(progress, "FAILED", $"FAILED {fullImagePath}: {ex.Message}", fullImagePath);
+                Report(
+                    progress,
+                    "FAILED",
+                    $"FAILED {fullImagePath}: {ex.Message}",
+                    fullImagePath,
+                    BuildProgressSnapshot(summary, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
                 await AppendRunLogAsync(runLogPath, "FAILED", new[]
                 {
                     $"image={fullImagePath}",
@@ -286,7 +327,11 @@ public sealed class PhotoAiScanner
         }
 
         summary.StopTime = DateTimeOffset.Now;
-        Report(progress, "RUN COMPLETE", "Scan complete.");
+        Report(
+            progress,
+            "RUN COMPLETE",
+            "Scan complete.",
+            snapshot: BuildProgressSnapshot(summary, PhotoAiRunState.Completed, "Run complete", imagePaths.Count));
         foreach (string summaryLine in BuildRunSummaryLines(summary))
         {
             Report(progress, "SUMMARY", summaryLine);
@@ -365,7 +410,12 @@ public sealed class PhotoAiScanner
             if (!wouldAnalyze)
             {
                 summary.Skipped++;
-                Report(progress, "WOULD SKIP", $"WOULD SKIP {displayIndex}/{imagePaths.Count}: existing PhotoAI sidecar and Force is off: {fullImagePath}", fullImagePath);
+                Report(
+                    progress,
+                    "WOULD SKIP",
+                    $"WOULD SKIP {displayIndex}/{imagePaths.Count}: existing PhotoAI sidecar and Force is off: {fullImagePath}",
+                    fullImagePath,
+                    BuildProgressSnapshot(summary, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
                 continue;
             }
 
@@ -382,7 +432,12 @@ public sealed class PhotoAiScanner
                     summary.WouldSkipXmpSidecar++;
                 }
 
-                Report(progress, "WOULD SKIP", $"WOULD SKIP {displayIndex}/{imagePaths.Count}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call would be made: {fullImagePath}", fullImagePath);
+                Report(
+                    progress,
+                    "WOULD SKIP",
+                    $"WOULD SKIP {displayIndex}/{imagePaths.Count}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call would be made: {fullImagePath}",
+                    fullImagePath,
+                    BuildProgressSnapshot(summary, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
                 continue;
             }
 
@@ -408,7 +463,12 @@ public sealed class PhotoAiScanner
                 summary.WouldSkipXmpSidecar++;
             }
 
-            Report(progress, "WOULD PROCESS", $"WOULD PROCESS {displayIndex}/{imagePaths.Count}: {fullImagePath}", fullImagePath);
+            Report(
+                progress,
+                "WOULD PROCESS",
+                $"WOULD PROCESS {displayIndex}/{imagePaths.Count}: {fullImagePath}",
+                fullImagePath,
+                BuildProgressSnapshot(summary, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
 
             if (wouldWriteJson)
             {
@@ -529,9 +589,53 @@ public sealed class PhotoAiScanner
             return;
         }
 
-        Report(progress, "PAUSED", "Scan paused. Click Resume to continue.");
-        await options.PauseController.WaitIfPausedAsync(cancellationToken);
-        Report(progress, "RESUMED", "Scan resumed.");
+        Report(
+            progress,
+            "PAUSED",
+            "Scan paused. Click Resume to continue.",
+            snapshot: PhotoAiRunProgressSnapshot.Create(
+                PhotoAiRunState.Paused,
+                "Paused",
+                DateTimeOffset.Now,
+                DateTimeOffset.Now,
+                totalFiles: null,
+                completedFiles: 0,
+                skippedFiles: 0,
+                failedFiles: 0));
+        try
+        {
+            await options.PauseController.WaitIfPausedAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            Report(
+                progress,
+                "CANCELLED",
+                "Scan cancelled by user.",
+                snapshot: PhotoAiRunProgressSnapshot.Create(
+                    PhotoAiRunState.Cancelled,
+                    "Cancelled",
+                    DateTimeOffset.Now,
+                    DateTimeOffset.Now,
+                    totalFiles: null,
+                    completedFiles: 0,
+                    skippedFiles: 0,
+                    failedFiles: 0));
+            throw;
+        }
+        Report(
+            progress,
+            "RESUMED",
+            "Scan resumed.",
+            snapshot: PhotoAiRunProgressSnapshot.Create(
+                PhotoAiRunState.Running,
+                "Generating descriptions",
+                DateTimeOffset.Now,
+                DateTimeOffset.Now,
+                totalFiles: null,
+                completedFiles: 0,
+                skippedFiles: 0,
+                failedFiles: 0));
     }
 
     public async Task<string[]> GetAvailableOllamaModelsAsync(string ollamaBaseUrl, CancellationToken cancellationToken = default)
@@ -1323,13 +1427,38 @@ Other rules:
         ];
     }
 
-    private static void Report(IProgress<PhotoAiScanProgress>? progress, string eventName, string message, string? imagePath = null)
+    private static PhotoAiRunProgressSnapshot BuildProgressSnapshot(
+        PhotoAiScanSummary summary,
+        PhotoAiRunState state,
+        string phase,
+        int? totalFiles)
+    {
+        int completedFiles = summary.DryRun ? summary.WouldProcess : summary.Completed;
+
+        return PhotoAiRunProgressSnapshot.Create(
+            state,
+            phase,
+            summary.StartTime,
+            DateTimeOffset.Now,
+            totalFiles,
+            completedFiles,
+            summary.Skipped,
+            summary.Failed);
+    }
+
+    private static void Report(
+        IProgress<PhotoAiScanProgress>? progress,
+        string eventName,
+        string message,
+        string? imagePath = null,
+        PhotoAiRunProgressSnapshot? snapshot = null)
     {
         progress?.Report(new PhotoAiScanProgress
         {
             EventName = eventName,
             Message = message,
-            ImagePath = imagePath
+            ImagePath = imagePath,
+            Snapshot = snapshot
         });
     }
 }
