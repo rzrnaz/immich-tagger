@@ -117,6 +117,12 @@ public sealed class PhotoAiScanSummary
 {
     public string RootPath { get; init; } = "";
     public string RunLogPath { get; init; } = "";
+    public DateTimeOffset StartTime { get; init; }
+    public DateTimeOffset? StopTime { get; set; }
+    public TimeSpan ElapsedTime => (StopTime ?? DateTimeOffset.Now) - StartTime;
+    public TimeSpan AverageTimePerProcessedPhoto => Completed > 0
+        ? TimeSpan.FromTicks(ElapsedTime.Ticks / Completed)
+        : TimeSpan.Zero;
     public int ImagesFound { get; set; }
     public int Completed { get; set; }
     public int Skipped { get; set; }

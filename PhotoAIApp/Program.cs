@@ -84,6 +84,10 @@ try
 
         Console.WriteLine();
         Console.WriteLine("Scan complete.");
+        Console.WriteLine($"Start time:          {FormatSummaryTimestamp(summary.StartTime)}");
+        Console.WriteLine($"Stop time:           {FormatSummaryTimestamp(summary.StopTime)}");
+        Console.WriteLine($"Elapsed time:        {FormatSummaryDuration(summary.ElapsedTime)}");
+        Console.WriteLine($"Average/photo:       {FormatSummaryDuration(summary.AverageTimePerProcessedPhoto)}");
         Console.WriteLine($"Images found:        {summary.ImagesFound}");
         if (summary.DryRun)
         {
@@ -181,6 +185,20 @@ static void PrintUsage()
     Console.WriteLine();
     Console.WriteLine("Notes:");
     Console.WriteLine(@"  scan creates a per-run anomaly log in <scan-root>\.photoai\.");
+}
+
+static string FormatSummaryTimestamp(DateTimeOffset? timestamp)
+{
+    return timestamp is null
+        ? "n/a"
+        : timestamp.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz");
+}
+
+static string FormatSummaryDuration(TimeSpan duration)
+{
+    return duration.TotalHours >= 1
+        ? $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}"
+        : $"{duration.Minutes:00}:{duration.Seconds:00}";
 }
 
 static int? ReadIntOption(string[] args, string optionName)

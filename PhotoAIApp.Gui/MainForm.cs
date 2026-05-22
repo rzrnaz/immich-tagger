@@ -733,6 +733,10 @@ public sealed class MainForm : Form
 
             AppendLog("");
             AppendLog("Scan complete.");
+            AppendLog($"Start time:          {FormatSummaryTimestamp(summary.StartTime)}");
+            AppendLog($"Stop time:           {FormatSummaryTimestamp(summary.StopTime)}");
+            AppendLog($"Elapsed time:        {FormatSummaryDuration(summary.ElapsedTime)}");
+            AppendLog($"Average/photo:       {FormatSummaryDuration(summary.AverageTimePerProcessedPhoto)}");
             AppendLog($"Images found:        {summary.ImagesFound}");
 
             if (summary.DryRun)
@@ -817,6 +821,20 @@ public sealed class MainForm : Form
         }
 
         _logTextBox.AppendText(message + Environment.NewLine);
+    }
+
+    private static string FormatSummaryTimestamp(DateTimeOffset? timestamp)
+    {
+        return timestamp is null
+            ? "n/a"
+            : timestamp.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz");
+    }
+
+    private static string FormatSummaryDuration(TimeSpan duration)
+    {
+        return duration.TotalHours >= 1
+            ? $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}"
+            : $"{duration.Minutes:00}:{duration.Seconds:00}";
     }
 
     private void OpenLastRunLog()

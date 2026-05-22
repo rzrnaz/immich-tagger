@@ -38,10 +38,12 @@ public sealed class PhotoAiScanner
         }
 
         string runLogPath = CreateRunLogPath(rootPath);
+        DateTimeOffset startTime = DateTimeOffset.Now;
         var summary = new PhotoAiScanSummary
         {
             RootPath = rootPath,
             RunLogPath = options.DryRun ? "(dry run - no anomaly log written)" : runLogPath,
+            StartTime = startTime,
             DryRun = options.DryRun
         };
 
@@ -104,9 +106,16 @@ public sealed class PhotoAiScanner
 
         if (imagePaths.Count == 0)
         {
+            summary.StopTime = DateTimeOffset.Now;
             if (!options.DryRun)
             {
-                await AppendRunLogAsync(runLogPath, "NO SUPPORTED IMAGES", new[] { $"scan_root={rootPath}" }, cancellationToken);
+                await AppendRunLogAsync(runLogPath, "NO SUPPORTED IMAGES", new[]
+                {
+                    $"scan_root={rootPath}",
+                    $"start_time={summary.StartTime:O}",
+                    $"stop_time={summary.StopTime.Value:O}",
+                    $"elapsed={FormatDuration(summary.ElapsedTime)}"
+                }, cancellationToken);
             }
             return summary;
         }
@@ -114,8 +123,9 @@ public sealed class PhotoAiScanner
         if (options.DryRun)
         {
             await PreviewScanAsync(imagePaths, rootPath, safetyRootPath, options, summary, progress, cancellationToken);
+            summary.StopTime = DateTimeOffset.Now;
             Report(progress, "DRY RUN COMPLETE", "Preview complete. No files were written.");
-            Report(progress, "SUMMARY", $"Would process: {summary.WouldProcess}; Would write JSON: {summary.WouldWriteJsonSidecar}; Would write XMP: {summary.WouldWriteXmpSidecar}; Would skip JSON: {summary.WouldSkipJsonSidecar}; Would skip XMP: {summary.WouldSkipXmpSidecar}; Existing JSON: {summary.ExistingJsonSidecars}; Existing XMP: {summary.ExistingXmpSidecars}; Blocked/failed: {summary.Failed}");
+            Report(progress, "SUMMARY", $"Start: {FormatTimestamp(summary.StartTime)}; Stop: {FormatTimestamp(summary.StopTime)}; Elapsed: {FormatDuration(summary.ElapsedTime)}; Average/photo: {FormatDuration(summary.AverageTimePerProcessedPhoto)}; Would process: {summary.WouldProcess}; Would write JSON: {summary.WouldWriteJsonSidecar}; Would write XMP: {summary.WouldWriteXmpSidecar}; Would skip JSON: {summary.WouldSkipJsonSidecar}; Would skip XMP: {summary.WouldSkipXmpSidecar}; Existing JSON: {summary.ExistingJsonSidecars}; Existing XMP: {summary.ExistingXmpSidecars}; Blocked/failed: {summary.Failed}");
             return summary;
         }
 
@@ -259,12 +269,17 @@ public sealed class PhotoAiScanner
             }
         }
 
+        summary.StopTime = DateTimeOffset.Now;
         Report(progress, "RUN COMPLETE", "Scan complete.");
-        Report(progress, "SUMMARY", $"Files processed: {summary.Completed}; XMP files successfully written: {summary.XmpWritten}; Skipped: {summary.Skipped}; Failed: {summary.Failed}; Parse/XMP skipped: {summary.ParseFailed}; Model failures: {summary.ModelFailures}; Fallback attempts: {summary.FallbackAttempts}; Fallback successes: {summary.FallbackSucceeded}");
+        Report(progress, "SUMMARY", $"Start: {FormatTimestamp(summary.StartTime)}; Stop: {FormatTimestamp(summary.StopTime)}; Elapsed: {FormatDuration(summary.ElapsedTime)}; Average/photo: {FormatDuration(summary.AverageTimePerProcessedPhoto)}; Files processed: {summary.Completed}; XMP files successfully written: {summary.XmpWritten}; Skipped: {summary.Skipped}; Failed: {summary.Failed}; Parse/XMP skipped: {summary.ParseFailed}; Model failures: {summary.ModelFailures}; Fallback attempts: {summary.FallbackAttempts}; Fallback successes: {summary.FallbackSucceeded}");
 
         await AppendRunLogAsync(runLogPath, "RUN COMPLETE", new[]
         {
             $"images_found={summary.ImagesFound}",
+            $"start_time={summary.StartTime:O}",
+            $"stop_time={summary.StopTime.Value:O}",
+            $"elapsed={FormatDuration(summary.ElapsedTime)}",
+            $"average_time_per_processed_photo={FormatDuration(summary.AverageTimePerProcessedPhoto)}",
             $"completed={summary.Completed}",
             $"skipped={summary.Skipped}",
             $"failed={summary.Failed}",
@@ -1207,6 +1222,20 @@ Other rules:
         }
 
         return ollamaBaseUrl;
+    }
+
+    private static string FormatTimestamp(DateTimeOffset? timestamp)
+    {
+        return timestamp is null
+            ? "n/a"
+            : timestamp.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz");
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        return duration.TotalHours >= 1
+            ? $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}"
+            : $"{duration.Minutes:00}:{duration.Seconds:00}";
     }
 
     private static void Report(IProgress<PhotoAiScanProgress>? progress, string eventName, string message, string? imagePath = null)
