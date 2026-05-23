@@ -194,6 +194,37 @@ Assert(dryRunSummaryDocument.PlainText.Contains("Mode: Dry run", StringCompariso
 Assert(dryRunSummaryDocument.PlainText.Contains("Would process: 3", StringComparison.Ordinal), "Dry-run summary should include would-process count");
 Assert(dryRunSummaryDocument.PlainText.Contains("Would write XMP: 2", StringComparison.Ordinal), "Dry-run summary should include would-write XMP count");
 
+string repositoryRoot = FindRepositoryRoot();
+string mainFormSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Gui", "MainForm.cs"));
+Assert(mainFormSource.Contains("FormBorderStyle = FormBorderStyle.Sizable", StringComparison.Ordinal),
+    "Main GUI window should explicitly be sizeable so users can expand clipped sections");
+Assert(!mainFormSource.Contains("panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));", StringComparison.Ordinal),
+    "Live status panel should not use fixed 32px rows that clip on scaled displays");
+Assert(!mainFormSource.Contains("container.RowStyles.Add(new RowStyle(SizeType.Absolute, 14));", StringComparison.Ordinal),
+    "Live status labels should not use fixed 14px rows that clip on scaled displays");
+Assert(mainFormSource.Contains("ColumnCount = 3", StringComparison.Ordinal),
+    "Live status should use a less crowded 3-column layout instead of six status fields in one row");
+Assert(!mainFormSource.Contains("Recent status is limited to the last 5 lines below", StringComparison.Ordinal),
+    "Live status should not spend vertical space on a clipped explanatory hint line");
+Assert(!mainFormSource.Contains("CreateStatusValueLabel(\"Estimating...\")", StringComparison.Ordinal),
+    "Idle live-status fields should initialize blank instead of showing Estimating before a run starts");
+Assert(mainFormSource.Contains("ClearLiveStatus();", StringComparison.Ordinal),
+    "GUI should clear live-status fields when no scan is running");
+Assert(mainFormSource.Contains("Height = 40", StringComparison.Ordinal),
+    "Action buttons should be tall enough to avoid vertical clipping on scaled displays");
+Assert(!mainFormSource.Contains("Height = 34", StringComparison.Ordinal),
+    "Browse, refresh, and dialog buttons should not use cramped 34px heights on scaled displays");
+Assert(mainFormSource.Contains("Color.FromArgb(46, 125, 50)", StringComparison.Ordinal),
+    "Run scan button should use a green background");
+Assert(mainFormSource.Contains("Color.FromArgb(249, 168, 37)", StringComparison.Ordinal),
+    "Pause button should use a yellow background");
+Assert(mainFormSource.Contains("Color.FromArgb(198, 40, 40)", StringComparison.Ordinal),
+    "Stop button should use a red background");
+Assert(mainFormSource.Contains("panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));", StringComparison.Ordinal),
+    "Scan-target rows should be tall enough for 40px buttons plus vertical margins");
+Assert(!mainFormSource.Contains("button.Margin = new Padding(0, 0, 0, 8);", StringComparison.Ordinal),
+    "Scan-target row buttons should not lose 8px of vertical space to bottom margin");
+
 string tempRoot = Path.Combine(Path.GetTempPath(), $"photoai-foundation-tests-{Guid.NewGuid():N}");
 Directory.CreateDirectory(tempRoot);
 try
@@ -362,6 +393,22 @@ static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
 
         await Task.Delay(25);
     }
+}
+
+static string FindRepositoryRoot()
+{
+    DirectoryInfo? directory = new(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "PhotoAIApp.sln")))
+        {
+            return directory.FullName;
+        }
+
+        directory = directory.Parent;
+    }
+
+    throw new InvalidOperationException("Could not locate PhotoAIApp repository root from test output directory.");
 }
 
 sealed class CollectingProgress<T>(List<T> items) : IProgress<T>

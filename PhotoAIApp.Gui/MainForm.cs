@@ -20,20 +20,31 @@ public sealed class MainForm : Form
     private readonly CheckBox _overwriteSidecarsCheckBox = new() { Text = "Overwrite XMP+", Checked = true, AutoSize = true };
     private readonly CheckBox _addTagsCheckBox = new() { Text = "Add Tags", Checked = false, AutoSize = true };
     private readonly CheckBox _dryRunCheckBox = new() { Text = "Dry Run", Checked = true, AutoSize = true };
-    private readonly Button _browseLibraryRootButton = new() { Text = "Browse...", Width = 120, Height = 34 };
-    private readonly Button _browseSelectedFolderButton = new() { Text = "Browse...", Width = 120, Height = 34 };
-    private readonly Button _refreshModelsButton = new() { Text = "Refresh models", Width = 150, Height = 34 };
-    private readonly Button _runButton = new() { Text = "Run scan", Width = 130, Height = 36 };
-    private readonly Button _pauseButton = new() { Text = "Pause", Width = 100, Height = 36, Enabled = false };
-    private readonly Button _cancelButton = new() { Text = "Stop", Width = 100, Height = 36, Enabled = false };
-    private readonly Button _openLogButton = new() { Text = "Open log", Width = 120, Height = 36, Enabled = false };
+    private readonly Button _browseLibraryRootButton = new() { Text = "Browse...", Width = 120, Height = 40 };
+    private readonly Button _browseSelectedFolderButton = new() { Text = "Browse...", Width = 120, Height = 40 };
+    private readonly Button _refreshModelsButton = new() { Text = "Refresh models", Width = 150, Height = 40 };
+    private readonly Button _runButton = new() { Text = "Run scan", Width = 130, Height = 40 };
+    private readonly Button _pauseButton = new() { Text = "Pause", Width = 100, Height = 40, Enabled = false };
+    private readonly Button _cancelButton = new() { Text = "Stop", Width = 100, Height = 40, Enabled = false };
+    private readonly Button _openLogButton = new() { Text = "Open log", Width = 120, Height = 40, Enabled = false };
+    private readonly Panel _inlineFolderPickerHost = new()
+    {
+        Dock = DockStyle.Top,
+        AutoSize = false,
+        Height = 0,
+        Visible = false,
+        BorderStyle = BorderStyle.FixedSingle,
+        Margin = new Padding(0, 0, 0, 8)
+    };
+    private readonly RowStyle _inlineFolderPickerRowStyle = new(SizeType.Absolute, 0);
+    private SafeFolderPickerForm? _inlineFolderPicker;
     private readonly ToolTip _toolTip = new();
-    private readonly Label _phaseValueLabel = CreateStatusValueLabel("Ready");
-    private readonly Label _startTimeValueLabel = CreateStatusValueLabel("n/a");
-    private readonly Label _elapsedValueLabel = CreateStatusValueLabel("00:00");
-    private readonly Label _remainingValueLabel = CreateStatusValueLabel("Estimating...");
-    private readonly Label _etaValueLabel = CreateStatusValueLabel("Estimating...");
-    private readonly Label _countsValueLabel = CreateStatusValueLabel("0 / 0");
+    private readonly Label _phaseValueLabel = CreateStatusValueLabel(string.Empty);
+    private readonly Label _startTimeValueLabel = CreateStatusValueLabel(string.Empty);
+    private readonly Label _elapsedValueLabel = CreateStatusValueLabel(string.Empty);
+    private readonly Label _remainingValueLabel = CreateStatusValueLabel(string.Empty);
+    private readonly Label _etaValueLabel = CreateStatusValueLabel(string.Empty);
+    private readonly Label _countsValueLabel = CreateStatusValueLabel(string.Empty);
     private readonly ProgressBar _progressBar = new()
     {
         Dock = DockStyle.Fill,
@@ -67,8 +78,11 @@ public sealed class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 10F);
         Width = 1300;
-        Height = 820;
-        MinimumSize = new Size(1120, 720);
+        Height = 860;
+        MinimumSize = new Size(980, 680);
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
+        SizeGripStyle = SizeGripStyle.Show;
         StartPosition = FormStartPosition.CenterScreen;
 
         var main = new TableLayoutPanel
@@ -101,8 +115,8 @@ public sealed class MainForm : Form
         _toolTip.SetToolTip(_overwriteSidecarsCheckBox, "When checked, existing .photoai.json and .jpg.xmp sidecars are regenerated together. When unchecked, existing sidecars are protected and no-op images skip the LLM.");
         ApplyModelPreferenceToInputs();
 
-        _browseLibraryRootButton.Click += (_, _) => BrowseForFolder(_libraryRootTextBox, "Choose Immich library root / safety root");
-        _browseSelectedFolderButton.Click += (_, _) => BrowseForFolder(_selectedFolderTextBox, "Choose folder to scan", _libraryRootTextBox.Text);
+        _browseLibraryRootButton.Click += (_, _) => ShowInlineFolderPicker(_libraryRootTextBox, "Choose Immich library root / safety root");
+        _browseSelectedFolderButton.Click += (_, _) => ShowInlineFolderPicker(_selectedFolderTextBox, "Choose folder to scan", _libraryRootTextBox.Text);
         _runButton.Click += async (_, _) => await RunScanAsync();
         _pauseButton.Click += (_, _) => TogglePause();
         _cancelButton.Click += (_, _) => _cancellationTokenSource?.Cancel();
@@ -128,38 +142,26 @@ public sealed class MainForm : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 6,
+            ColumnCount = 3,
             RowCount = 3
         };
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < 3; i++)
         {
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16.6667F));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.3333F));
         }
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
 
         AddStatusPair(panel, 0, 0, "Phase", _phaseValueLabel);
         AddStatusPair(panel, 1, 0, "Start", _startTimeValueLabel);
         AddStatusPair(panel, 2, 0, "Elapsed", _elapsedValueLabel);
-        AddStatusPair(panel, 3, 0, "Remaining", _remainingValueLabel);
-        AddStatusPair(panel, 4, 0, "ETA", _etaValueLabel);
-        AddStatusPair(panel, 5, 0, "Files", _countsValueLabel);
+        AddStatusPair(panel, 0, 1, "Remaining", _remainingValueLabel);
+        AddStatusPair(panel, 1, 1, "ETA", _etaValueLabel);
+        AddStatusPair(panel, 2, 1, "Files", _countsValueLabel);
 
-        panel.Controls.Add(_progressBar, 0, 1);
-        panel.SetColumnSpan(_progressBar, 6);
-
-        var hint = new Label
-        {
-            Text = "Recent status is limited to the last 5 lines below; the full anomaly log remains available after live runs.",
-            Dock = DockStyle.Fill,
-            AutoEllipsis = true,
-            ForeColor = SystemColors.GrayText,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Margin = new Padding(0, 4, 0, 0)
-        };
-        panel.Controls.Add(hint, 0, 2);
-        panel.SetColumnSpan(hint, 6);
+        panel.Controls.Add(_progressBar, 0, 2);
+        panel.SetColumnSpan(_progressBar, 3);
 
         group.Controls.Add(panel);
         return group;
@@ -174,16 +176,17 @@ public sealed class MainForm : Form
             RowCount = 2,
             Margin = new Padding(0, 0, 10, 0)
         };
-        container.RowStyles.Add(new RowStyle(SizeType.Absolute, 14));
-        container.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         container.Controls.Add(new Label
         {
             Text = label.ToUpperInvariant(),
             Dock = DockStyle.Fill,
+            AutoSize = true,
             AutoEllipsis = true,
             ForeColor = SystemColors.GrayText,
             Font = new Font("Segoe UI", 7.5F, FontStyle.Bold),
-            Margin = new Padding(0)
+            Margin = new Padding(0, 0, 0, 2)
         }, 0, 0);
         container.Controls.Add(valueLabel, 0, 1);
         panel.Controls.Add(container, column, row);
@@ -195,6 +198,7 @@ public sealed class MainForm : Form
         {
             Text = text,
             Dock = DockStyle.Fill,
+            AutoSize = true,
             AutoEllipsis = true,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0),
@@ -218,7 +222,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Top,
             ColumnCount = 3,
-            RowCount = 7,
+            RowCount = 8,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink
         };
@@ -228,11 +232,14 @@ public sealed class MainForm : Form
 
         AddPathRow(panel, 0, "Immich library root:", _libraryRootTextBox, _browseLibraryRootButton);
         AddPathRow(panel, 1, "Selected folder:", _selectedFolderTextBox, _browseSelectedFolderButton);
-        AddPathRow(panel, 2, "Preferred model:", _modelPreferenceComboBox, null);
-        AddPathRow(panel, 3, "PC Ollama URL:", _ollamaTextBox, null);
-        AddPathRow(panel, 4, "PC model:", _modelComboBox, _refreshModelsButton);
-        AddPathRow(panel, 5, "Unraid Ollama URL:", _fallbackOllamaTextBox, null);
-        AddPathRow(panel, 6, "Unraid model:", _fallbackModelTextBox, null);
+        panel.RowStyles.Add(_inlineFolderPickerRowStyle);
+        panel.Controls.Add(_inlineFolderPickerHost, 1, 2);
+        panel.SetColumnSpan(_inlineFolderPickerHost, 2);
+        AddPathRow(panel, 3, "Preferred model:", _modelPreferenceComboBox, null);
+        AddPathRow(panel, 4, "PC Ollama URL:", _ollamaTextBox, null);
+        AddPathRow(panel, 5, "PC model:", _modelComboBox, _refreshModelsButton);
+        AddPathRow(panel, 6, "Unraid Ollama URL:", _fallbackOllamaTextBox, null);
+        AddPathRow(panel, 7, "Unraid model:", _fallbackModelTextBox, null);
 
         group.Controls.Add(panel);
         return group;
@@ -240,7 +247,7 @@ public sealed class MainForm : Form
 
     private static void AddPathRow(TableLayoutPanel panel, int row, string label, Control inputControl, Button? button)
     {
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
 
         var labelControl = new Label
         {
@@ -248,11 +255,11 @@ public sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft,
             Dock = DockStyle.Fill,
             AutoSize = false,
-            Margin = new Padding(0, 0, 8, 8)
+            Margin = new Padding(0, 2, 8, 4)
         };
 
         inputControl.Dock = DockStyle.Fill;
-        inputControl.Margin = new Padding(0, 0, 8, 8);
+        inputControl.Margin = new Padding(0, 2, 8, 4);
 
         panel.Controls.Add(labelControl, 0, row);
         panel.Controls.Add(inputControl, 1, row);
@@ -260,7 +267,7 @@ public sealed class MainForm : Form
         if (button is not null)
         {
             button.Dock = DockStyle.Fill;
-            button.Margin = new Padding(0, 0, 0, 8);
+            button.Margin = new Padding(0, 2, 0, 4);
             panel.Controls.Add(button, 2, row);
         }
     }
@@ -326,7 +333,7 @@ public sealed class MainForm : Form
 
         var limitLabel = new Label
         {
-            Text = "Limit, 0 = all:",
+            Text = "File Limit",
             TextAlign = ContentAlignment.MiddleLeft,
             AutoSize = false,
             Width = 150,
@@ -370,14 +377,20 @@ public sealed class MainForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             WrapContents = false,
             FlowDirection = FlowDirection.LeftToRight,
-            Padding = new Padding(0, 0, 0, 12),
-            Margin = new Padding(0, 0, 0, 8)
+            Padding = new Padding(0, 8, 0, 14),
+            Margin = new Padding(0, 2, 0, 10)
         };
 
         _runButton.Margin = new Padding(0, 0, 10, 0);
         _pauseButton.Margin = new Padding(0, 0, 10, 0);
         _cancelButton.Margin = new Padding(0, 0, 10, 0);
         _openLogButton.Margin = new Padding(0, 0, 10, 0);
+        StyleActionButton(_runButton, Color.FromArgb(46, 125, 50), Color.White);
+        StyleActionButton(_pauseButton, Color.FromArgb(249, 168, 37), Color.Black);
+        StyleActionButton(_cancelButton, Color.FromArgb(198, 40, 40), Color.White);
+        StyleActionButton(_openLogButton, Color.FromArgb(132, 132, 132), Color.White);
+        KeepButtonTextColor(_cancelButton, Color.White);
+        KeepButtonTextColor(_openLogButton, Color.White);
 
         panel.Controls.Add(_runButton);
         panel.Controls.Add(_pauseButton);
@@ -387,18 +400,78 @@ public sealed class MainForm : Form
         return panel;
     }
 
-    private static void BrowseForFolder(TextBox target, string description, string? fallbackPath = null)
+    private static void StyleActionButton(Button button, Color backColor, Color foreColor)
     {
+        button.FlatStyle = FlatStyle.Flat;
+        button.BackColor = backColor;
+        button.ForeColor = foreColor;
+        button.UseVisualStyleBackColor = false;
+        button.FlatAppearance.BorderColor = ControlPaint.Dark(backColor);
+        button.FlatAppearance.BorderSize = 1;
+        button.Font = new Font(button.Font, FontStyle.Bold);
+    }
+
+    private static void KeepButtonTextColor(Button button, Color foreColor)
+    {
+        button.EnabledChanged += (_, _) => button.ForeColor = foreColor;
+    }
+
+    private void ShowInlineFolderPicker(TextBox target, string description, string? fallbackPath = null)
+    {
+        if (_inlineFolderPickerHost.Visible && ReferenceEquals(_inlineFolderPickerHost.Tag, target))
+        {
+            HideInlineFolderPicker();
+            return;
+        }
+
         string initialPath = FirstExistingDirectory(target.Text, fallbackPath, Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
         string? pickerRootPath = !string.IsNullOrWhiteSpace(fallbackPath) && Directory.Exists(fallbackPath)
             ? fallbackPath
             : null;
 
-        using var dialog = new SafeFolderPickerForm(description, initialPath, pickerRootPath);
-        if (dialog.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.SelectedPath))
+        HideInlineFolderPicker();
+
+        _inlineFolderPicker = new SafeFolderPickerForm(description, initialPath, pickerRootPath)
         {
-            target.Text = dialog.SelectedPath;
+            TopLevel = false,
+            FormBorderStyle = FormBorderStyle.None,
+            Dock = DockStyle.Fill,
+            MinimumSize = Size.Empty
+        };
+        _inlineFolderPicker.FolderSelected += (_, selectedPath) =>
+        {
+            if (!string.IsNullOrWhiteSpace(selectedPath))
+            {
+                target.Text = selectedPath;
+            }
+
+            HideInlineFolderPicker();
+        };
+        _inlineFolderPicker.PickerCancelled += (_, _) => HideInlineFolderPicker();
+
+        _inlineFolderPickerHost.Tag = target;
+        _inlineFolderPickerHost.Height = 360;
+        _inlineFolderPickerRowStyle.Height = 360;
+        _inlineFolderPickerHost.Controls.Add(_inlineFolderPicker);
+        _inlineFolderPickerHost.Visible = true;
+        _inlineFolderPicker.Show();
+        _inlineFolderPicker.FocusPicker();
+    }
+
+    private void HideInlineFolderPicker()
+    {
+        if (_inlineFolderPicker is not null)
+        {
+            _inlineFolderPicker.Close();
+            _inlineFolderPicker.Dispose();
+            _inlineFolderPicker = null;
         }
+
+        _inlineFolderPickerHost.Controls.Clear();
+        _inlineFolderPickerHost.Tag = null;
+        _inlineFolderPickerHost.Visible = false;
+        _inlineFolderPickerHost.Height = 0;
+        _inlineFolderPickerRowStyle.Height = 0;
     }
 
     private static string FirstExistingDirectory(params string?[] candidates)
@@ -425,6 +498,8 @@ public sealed class MainForm : Form
         private readonly string? _pickerRootPath;
 
         public string SelectedPath { get; private set; }
+        public event EventHandler<string>? FolderSelected;
+        public event EventHandler? PickerCancelled;
 
         public SafeFolderPickerForm(string description, string initialPath, string? pickerRootPath = null)
         {
@@ -497,8 +572,8 @@ public sealed class MainForm : Form
                 Padding = new Padding(0, 8, 0, 0),
                 Margin = new Padding(0)
             };
-            _okButton.Height = 34;
-            _cancelButton.Height = 34;
+            _okButton.Height = 40;
+            _cancelButton.Height = 40;
             _okButton.Margin = new Padding(8, 0, 0, 0);
             _cancelButton.Margin = new Padding(8, 0, 0, 0);
             buttonPanel.Controls.Add(_cancelButton);
@@ -514,9 +589,19 @@ public sealed class MainForm : Form
             _tree.AfterSelect += (_, e) => SetSelectedPath(NodePath(e.Node));
             _upButton.Click += (_, _) => NavigateUp();
             _refreshButton.Click += (_, _) => RefreshCurrentNode();
-            _okButton.Click += (_, _) => SelectedPath = _pathTextBox.Text;
+            _okButton.Click += (_, _) =>
+            {
+                SelectedPath = _pathTextBox.Text;
+                FolderSelected?.Invoke(this, SelectedPath);
+            };
+            _cancelButton.Click += (_, _) => PickerCancelled?.Invoke(this, EventArgs.Empty);
 
             LoadInitialPath(initialPath);
+        }
+
+        public void FocusPicker()
+        {
+            _tree.Focus();
         }
 
         private void LoadInitialPath(string initialPath)
@@ -809,7 +894,7 @@ public sealed class MainForm : Form
         _logTextBox.Clear();
         _recentStatusLines.Clear();
         _lastSnapshot = null;
-        ResetLiveStatus();
+        StartLiveStatus();
         _statusTimer.Start();
         _lastRunLogPath = null;
         _openLogButton.Enabled = false;
@@ -878,6 +963,7 @@ public sealed class MainForm : Form
             _cancellationTokenSource = null;
             _pauseController = null;
             SetRunningState(false);
+            ClearLiveStatus();
         }
     }
 
@@ -903,6 +989,10 @@ public sealed class MainForm : Form
         _addTagsCheckBox.Enabled = !running;
         _dryRunCheckBox.Enabled = !running;
         _limitNumeric.Enabled = !running;
+        if (running)
+        {
+            HideInlineFolderPicker();
+        }
     }
 
     private void AppendLog(string message)
@@ -924,15 +1014,28 @@ public sealed class MainForm : Form
         _logTextBox.ScrollToCaret();
     }
 
-    private void ResetLiveStatus()
+    private void StartLiveStatus()
     {
-        _phaseValueLabel.Text = "Starting";
-        _startTimeValueLabel.Text = "n/a";
-        _elapsedValueLabel.Text = "00:00";
-        _remainingValueLabel.Text = "Estimating...";
-        _etaValueLabel.Text = "Estimating...";
-        _countsValueLabel.Text = "0 / 0";
+        _phaseValueLabel.Text = "Starting...";
+        _startTimeValueLabel.Text = string.Empty;
+        _elapsedValueLabel.Text = string.Empty;
+        _remainingValueLabel.Text = string.Empty;
+        _etaValueLabel.Text = string.Empty;
+        _countsValueLabel.Text = string.Empty;
         _progressBar.Style = ProgressBarStyle.Marquee;
+        _progressBar.Value = 0;
+    }
+
+    private void ClearLiveStatus()
+    {
+        _lastSnapshot = null;
+        _phaseValueLabel.Text = string.Empty;
+        _startTimeValueLabel.Text = string.Empty;
+        _elapsedValueLabel.Text = string.Empty;
+        _remainingValueLabel.Text = string.Empty;
+        _etaValueLabel.Text = string.Empty;
+        _countsValueLabel.Text = string.Empty;
+        _progressBar.Style = ProgressBarStyle.Continuous;
         _progressBar.Value = 0;
     }
 
@@ -1059,11 +1162,11 @@ public sealed class MainForm : Form
                 WrapContents = false,
                 Padding = new Padding(0, 10, 0, 0)
             };
-            var closeButton = new Button { Text = "Close", Width = 110, Height = 34, DialogResult = DialogResult.OK };
-            var saveTextButton = new Button { Text = "Save text...", Width = 120, Height = 34 };
-            var saveJsonButton = new Button { Text = "Save JSON...", Width = 120, Height = 34 };
-            var copyButton = new Button { Text = "Copy", Width = 100, Height = 34 };
-            var openLogButton = new Button { Text = "Open log", Width = 110, Height = 34, Enabled = !string.IsNullOrWhiteSpace(runLogPath) && File.Exists(runLogPath) };
+            var closeButton = new Button { Text = "Close", Width = 110, Height = 40, DialogResult = DialogResult.OK };
+            var saveTextButton = new Button { Text = "Save text...", Width = 120, Height = 40 };
+            var saveJsonButton = new Button { Text = "Save JSON...", Width = 120, Height = 40 };
+            var copyButton = new Button { Text = "Copy", Width = 100, Height = 40 };
+            var openLogButton = new Button { Text = "Open log", Width = 110, Height = 40, Enabled = !string.IsNullOrWhiteSpace(runLogPath) && File.Exists(runLogPath) };
 
             closeButton.Margin = new Padding(8, 0, 0, 0);
             saveTextButton.Margin = new Padding(8, 0, 0, 0);
@@ -1138,3 +1241,4 @@ public sealed class MainForm : Form
         }
     }
 }
+
