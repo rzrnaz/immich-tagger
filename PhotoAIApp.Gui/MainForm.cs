@@ -1,6 +1,7 @@
 using PhotoAIApp.Core;
 using System.Diagnostics;
 using System.Drawing;
+using System.Reflection;
 using System.Windows.Forms;
 
 namespace PhotoAIApp.Gui;
@@ -74,7 +75,7 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "PhotoAI Immich Sidecar Tool";
+        Text = $"PhotoAI Immich Sidecar Tool v{GetDisplayVersion()}";
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 10F);
         Width = 1300;
@@ -1099,6 +1100,20 @@ public sealed class MainForm : Form
         return duration.TotalHours >= 1
             ? $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}"
             : $"{duration.Minutes:00}:{duration.Seconds:00}";
+    }
+
+    private static string GetDisplayVersion()
+    {
+        string? version = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            version = Assembly.GetExecutingAssembly().GetName().Version?.ToString();
+        }
+
+        return string.IsNullOrWhiteSpace(version) ? "dev" : version;
     }
 
     private void OpenLastRunLog()
