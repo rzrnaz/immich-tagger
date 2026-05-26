@@ -91,7 +91,7 @@ try
         Console.WriteLine($"Start time:          {FormatSummaryTimestamp(summary.StartTime)}");
         Console.WriteLine($"Stop time:           {FormatSummaryTimestamp(summary.StopTime)}");
         Console.WriteLine($"Elapsed time:        {FormatSummaryDuration(summary.ElapsedTime)}");
-        Console.WriteLine($"Average/photo:       {FormatSummaryDuration(summary.AverageTimePerProcessedPhoto)}");
+        Console.WriteLine($"Average/photo:       {FormatAverageSecondsPerPhoto(summary.AverageTimePerProcessedPhoto)}");
         Console.WriteLine($"Images found:        {summary.ImagesFound}");
         if (summary.DryRun)
         {
@@ -204,6 +204,12 @@ static string FormatSummaryDuration(TimeSpan duration)
     return duration.TotalHours >= 1
         ? $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}"
         : $"{duration.Minutes:00}:{duration.Seconds:00}";
+}
+
+static string FormatAverageSecondsPerPhoto(TimeSpan duration)
+{
+    double seconds = duration < TimeSpan.Zero ? 0.0 : duration.TotalSeconds;
+    return $"{seconds:F1} seconds";
 }
 
 static int? ReadIntOption(string[] args, string optionName)

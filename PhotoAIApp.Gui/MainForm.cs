@@ -2,32 +2,44 @@ using PhotoAIApp.Core;
 using System.Diagnostics;
 using System.Drawing;
 using System.Reflection;
+using System.Text.Json;
 using System.Windows.Forms;
 
 namespace PhotoAIApp.Gui;
 
 public sealed class MainForm : Form
 {
-    private readonly TextBox _libraryRootTextBox = new() { Text = @"P:\" };
-    private readonly TextBox _selectedFolderTextBox = new() { Text = @"P:\photoai-test" };
-    private readonly TextBox _ollamaTextBox = new() { Text = PhotoAiDefaults.QwenPcOllamaBaseUrl };
-    private readonly ComboBox _modelComboBox = new() { Text = PhotoAiDefaults.QwenPcModel, DropDownStyle = ComboBoxStyle.DropDown };
-    private readonly ComboBox _modelPreferenceComboBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
-    private readonly TextBox _fallbackOllamaTextBox = new() { Text = PhotoAiDefaults.UnraidOllamaBaseUrl };
-    private readonly TextBox _fallbackModelTextBox = new() { Text = PhotoAiDefaults.UnraidModel };
+    private readonly TextBox _selectedFolderTextBox = new() { Text = @"P:\" };
+    private readonly TreeView _selectedFoldersTreeView = new()
+    {
+        Height = 330,
+        CheckBoxes = true,
+        HideSelection = false,
+        ShowLines = true,
+        ShowPlusMinus = true,
+        ShowRootLines = true
+    };
+
+    private readonly ComboBox _profileComboBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly Button _advancedSettingsButton = new() { Text = "Advanced...", Width = 150, Height = 40 };
+    private readonly Label _profileSummaryLabel = new()
+    {
+        AutoSize = true,
+        Dock = DockStyle.Fill,
+        ForeColor = SystemColors.GrayText,
+        Margin = new Padding(0, 2, 8, 4)
+    };
     private readonly NumericUpDown _limitNumeric = new() { Minimum = 0, Maximum = 100000, Value = 0, Width = 100 };
     private readonly CheckBox _recursiveCheckBox = new() { Text = "Subfolders", AutoSize = true };
     private readonly CheckBox _forceCheckBox = new() { Text = "Scan Existing", Checked = true, AutoSize = true };
     private readonly CheckBox _overwriteSidecarsCheckBox = new() { Text = "Overwrite XMP+", Checked = true, AutoSize = true };
     private readonly CheckBox _addTagsCheckBox = new() { Text = "Add Tags", Checked = false, AutoSize = true };
     private readonly CheckBox _dryRunCheckBox = new() { Text = "Dry Run", Checked = true, AutoSize = true };
-    private readonly Button _browseLibraryRootButton = new() { Text = "Browse...", Width = 120, Height = 40 };
     private readonly Button _browseSelectedFolderButton = new() { Text = "Browse...", Width = 120, Height = 40 };
-    private readonly Button _refreshModelsButton = new() { Text = "Refresh models", Width = 150, Height = 40 };
-    private readonly Button _runButton = new() { Text = "Run scan", Width = 130, Height = 40 };
+    private readonly Button _runButton = new() { Text = "Run Scan", Width = 130, Height = 40 };
     private readonly Button _pauseButton = new() { Text = "Pause", Width = 100, Height = 40, Enabled = false };
     private readonly Button _cancelButton = new() { Text = "Stop", Width = 100, Height = 40, Enabled = false };
-    private readonly Button _openLogButton = new() { Text = "Open log", Width = 120, Height = 40, Enabled = false };
+    private readonly Button _openLogButton = new() { Text = "Open Log", Width = 120, Height = 40, Enabled = false };
     private readonly Panel _inlineFolderPickerHost = new()
     {
         Dock = DockStyle.Top,
@@ -46,6 +58,8 @@ public sealed class MainForm : Form
     private readonly Label _remainingValueLabel = CreateStatusValueLabel(string.Empty);
     private readonly Label _etaValueLabel = CreateStatusValueLabel(string.Empty);
     private readonly Label _countsValueLabel = CreateStatusValueLabel(string.Empty);
+    private readonly Label _primaryRetryValueLabel = CreateStatusValueLabel(string.Empty);
+    private readonly Label _fallbackValueLabel = CreateStatusValueLabel(string.Empty);
     private readonly ProgressBar _progressBar = new()
     {
         Dock = DockStyle.Fill,
@@ -60,27 +74,37 @@ public sealed class MainForm : Form
         Multiline = true,
         ReadOnly = true,
         ScrollBars = ScrollBars.Vertical,
-        WordWrap = false,
+        WordWrap = true,
         Dock = DockStyle.Top,
-        Height = 118,
+        Height = 320,
         Font = new Font("Consolas", 10F)
     };
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 1000 };
+    private readonly System.Windows.Forms.Timer _folderTreeAutoLoadTimer = new() { Interval = 500 };
     private readonly List<string> _recentStatusLines = [];
 
     private CancellationTokenSource? _cancellationTokenSource;
     private PhotoAiPauseController? _pauseController;
     private PhotoAiRunProgressSnapshot? _lastSnapshot;
     private string? _lastRunLogPath;
+    private PhotoAiGuiSettings _guiSettings = new();
+    private PhotoAiModelProfile _activeProfile = PhotoAiModelProfile.GetPreset(PhotoAiModelProfileId.HighQuality);
+    private bool _updatingFolderCheckState;
 
     public MainForm()
     {
         Text = $"PhotoAI Immich Sidecar Tool v{GetDisplayVersion()}";
+        Icon? appIcon = PhotoAiTheme.TryLoadApplicationIcon();
+        if (appIcon is not null)
+        {
+            Icon = appIcon;
+        }
+
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 10F);
         Width = 1300;
-        Height = 860;
-        MinimumSize = new Size(980, 680);
+        Height = 1020;
+        MinimumSize = new Size(980, 820);
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
         SizeGripStyle = SizeGripStyle.Show;
@@ -107,23 +131,54 @@ public sealed class MainForm : Form
         main.Controls.Add(_logTextBox, 0, 4);
 
         Controls.Add(main);
+        PhotoAiTheme.Apply(this);
 
-        _modelPreferenceComboBox.Items.Add(new ModelPreferenceItem("Qwen PC preferred (fallback to Unraid MiniCPM-V)", PhotoAiModelPreference.QwenPcWithUnraidFallback));
-        _modelPreferenceComboBox.Items.Add(new ModelPreferenceItem("Unraid MiniCPM-V only (no fallback)", PhotoAiModelPreference.UnraidMiniCpmOnly));
-        _modelPreferenceComboBox.SelectedIndex = 0;
-        _modelPreferenceComboBox.SelectedIndexChanged += (_, _) => ApplyModelPreferenceToInputs();
-        _toolTip.SetToolTip(_forceCheckBox, "When checked, images with an existing .photoai.json can be considered for re-scan. When unchecked, existing PhotoAI JSON means skip the image.");
-        _toolTip.SetToolTip(_overwriteSidecarsCheckBox, "When checked, existing .photoai.json and .jpg.xmp sidecars are regenerated together. When unchecked, existing sidecars are protected and no-op images skip the LLM.");
-        ApplyModelPreferenceToInputs();
+        InitializeProfilePicker();
+        LoadGuiSettings();
+        _profileComboBox.SelectedIndexChanged += (_, _) => ApplySelectedProfileFromCombo();
+        ConfigureToolTips();
 
-        _browseLibraryRootButton.Click += (_, _) => ShowInlineFolderPicker(_libraryRootTextBox, "Choose Immich library root / safety root");
-        _browseSelectedFolderButton.Click += (_, _) => ShowInlineFolderPicker(_selectedFolderTextBox, "Choose folder to scan", _libraryRootTextBox.Text);
+        _browseSelectedFolderButton.Click += (_, _) => ShowInlineFolderPicker(_selectedFolderTextBox, "Choose folder source");
+        _selectedFolderTextBox.TextChanged += (_, _) => ScheduleFolderTreeAutoLoad();
+        Shown += (_, _) => AutoLoadSelectableFoldersIfAvailable();
+        _selectedFoldersTreeView.BeforeExpand += (_, e) => LoadSubfolderNodes(e.Node);
+        _selectedFoldersTreeView.AfterCheck += (_, e) =>
+        {
+            if (e.Node is not null)
+            {
+                ApplyCheckedStateToDescendants(e.Node, e.Node.Checked);
+            }
+        };
         _runButton.Click += async (_, _) => await RunScanAsync();
         _pauseButton.Click += (_, _) => TogglePause();
         _cancelButton.Click += (_, _) => _cancellationTokenSource?.Cancel();
         _openLogButton.Click += (_, _) => OpenLastRunLog();
-        _refreshModelsButton.Click += async (_, _) => await RefreshModelsAsync();
+        _advancedSettingsButton.Click += async (_, _) => await ShowAdvancedSettingsAsync();
         _statusTimer.Tick += (_, _) => RefreshElapsedStatus();
+        _folderTreeAutoLoadTimer.Tick += (_, _) =>
+        {
+            _folderTreeAutoLoadTimer.Stop();
+            AutoLoadSelectableFoldersIfAvailable();
+        };
+    }
+
+    private void ConfigureToolTips()
+    {
+        _toolTip.AutoPopDelay = 15000;
+        _toolTip.InitialDelay = 350;
+        _toolTip.ReshowDelay = 100;
+        _toolTip.SetToolTip(_selectedFolderTextBox, "Folder source to scan. Defaults to P:\\ and automatically loads as an expandable checkbox tree when the path exists.");
+        _toolTip.SetToolTip(_selectedFoldersTreeView, "Folder tree for this run. Selected folders are scanned; unselected folders are excluded. Expand folders to reveal subfolders.");
+
+        _toolTip.SetToolTip(_profileComboBox, "Preset AI model/settings. High Quality uses Qwen 7B full resolution; Balanced uses Qwen 7B at 1440px.");
+        _toolTip.SetToolTip(_advancedSettingsButton, "Open primary/fallback Ollama server, model, and Max Image Size settings.");
+        _toolTip.SetToolTip(_recursiveCheckBox, "Include images in subfolders. Internal .photoai log folders are always ignored.");
+        _toolTip.SetToolTip(_forceCheckBox, "When checked, images with an existing .photoai.json can be considered for re-scan. When unchecked, existing PhotoAI JSON means skip the image.");
+        _toolTip.SetToolTip(_overwriteSidecarsCheckBox, "When checked, existing .photoai.json and .jpg.xmp sidecars are regenerated together. When unchecked, existing sidecars are protected and no-op images skip the LLM.");
+        _toolTip.SetToolTip(_addTagsCheckBox, "When checked, generated tags are written to the XMP sidecar in addition to description/caption fields.");
+        _toolTip.SetToolTip(_dryRunCheckBox, "Preview what would be scanned/written without calling Ollama or changing files.");
+        _toolTip.SetToolTip(_limitNumeric, "Optional maximum number of images to process. 0 means no limit.");
+        _toolTip.SetToolTip(_logTextBox, "Shows the 10 most recent run messages. Use Open log after a live run for the full .photoai anomaly log.");
     }
 
     private Control CreateStatusPanel()
@@ -144,12 +199,13 @@ public sealed class MainForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 3,
-            RowCount = 3
+            RowCount = 4
         };
         for (int i = 0; i < 3; i++)
         {
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.3333F));
         }
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
@@ -160,8 +216,10 @@ public sealed class MainForm : Form
         AddStatusPair(panel, 0, 1, "Remaining", _remainingValueLabel);
         AddStatusPair(panel, 1, 1, "ETA", _etaValueLabel);
         AddStatusPair(panel, 2, 1, "Files", _countsValueLabel);
+        AddStatusPair(panel, 0, 2, "Retry", _primaryRetryValueLabel);
+        AddStatusPair(panel, 1, 2, "Fallback", _fallbackValueLabel);
 
-        panel.Controls.Add(_progressBar, 0, 2);
+        panel.Controls.Add(_progressBar, 0, 3);
         panel.SetColumnSpan(_progressBar, 3);
 
         group.Controls.Add(panel);
@@ -172,10 +230,13 @@ public sealed class MainForm : Form
     {
         var container = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
             RowCount = 2,
-            Margin = new Padding(0, 0, 10, 0)
+            Margin = new Padding(0, 0, 10, 4),
+            Padding = new Padding(0)
         };
         container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -187,7 +248,7 @@ public sealed class MainForm : Form
             AutoEllipsis = true,
             ForeColor = SystemColors.GrayText,
             Font = new Font("Segoe UI", 7.5F, FontStyle.Bold),
-            Margin = new Padding(0, 0, 0, 2)
+            Margin = new Padding(0)
         }, 0, 0);
         container.Controls.Add(valueLabel, 0, 1);
         panel.Controls.Add(container, column, row);
@@ -198,10 +259,10 @@ public sealed class MainForm : Form
         return new Label
         {
             Text = text,
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
             AutoSize = true,
             AutoEllipsis = true,
-            TextAlign = ContentAlignment.MiddleLeft,
+            TextAlign = ContentAlignment.TopLeft,
             Margin = new Padding(0),
             Font = new Font("Segoe UI", 10F, FontStyle.Bold)
         };
@@ -223,7 +284,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Top,
             ColumnCount = 3,
-            RowCount = 8,
+            RowCount = 6,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink
         };
@@ -231,16 +292,23 @@ public sealed class MainForm : Form
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
 
-        AddPathRow(panel, 0, "Immich library root:", _libraryRootTextBox, _browseLibraryRootButton);
-        AddPathRow(panel, 1, "Selected folder:", _selectedFolderTextBox, _browseSelectedFolderButton);
+        AddPathRow(panel, 0, "Folder source:", _selectedFolderTextBox, _browseSelectedFolderButton);
         panel.RowStyles.Add(_inlineFolderPickerRowStyle);
-        panel.Controls.Add(_inlineFolderPickerHost, 1, 2);
+        panel.Controls.Add(_inlineFolderPickerHost, 1, 1);
         panel.SetColumnSpan(_inlineFolderPickerHost, 2);
-        AddPathRow(panel, 3, "Preferred model:", _modelPreferenceComboBox, null);
-        AddPathRow(panel, 4, "PC Ollama URL:", _ollamaTextBox, null);
-        AddPathRow(panel, 5, "PC model:", _modelComboBox, _refreshModelsButton);
-        AddPathRow(panel, 6, "Unraid Ollama URL:", _fallbackOllamaTextBox, null);
-        AddPathRow(panel, 7, "Unraid model:", _fallbackModelTextBox, null);
+        AddSelectedFolderChecklistRow(panel, 2);
+        AddPathRow(panel, 3, "AI profile:", _profileComboBox, _advancedSettingsButton);
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        panel.Controls.Add(new Label
+        {
+            Text = "Active settings:",
+            TextAlign = ContentAlignment.MiddleLeft,
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            Margin = new Padding(0, 2, 8, 4)
+        }, 0, 4);
+        panel.Controls.Add(_profileSummaryLabel, 1, 4);
+        panel.SetColumnSpan(_profileSummaryLabel, 2);
 
         group.Controls.Add(panel);
         return group;
@@ -273,6 +341,24 @@ public sealed class MainForm : Form
         }
     }
 
+    private void AddSelectedFolderChecklistRow(TableLayoutPanel panel, int row)
+    {
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 360));
+        panel.Controls.Add(new Label
+        {
+            Text = "Folder tree:",
+            TextAlign = ContentAlignment.MiddleLeft,
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            Margin = new Padding(0, 2, 8, 4)
+        }, 0, row);
+
+        _selectedFoldersTreeView.Dock = DockStyle.Fill;
+        _selectedFoldersTreeView.Margin = new Padding(0, 2, 8, 8);
+        panel.Controls.Add(_selectedFoldersTreeView, 1, row);
+        panel.SetColumnSpan(_selectedFoldersTreeView, 2);
+    }
+
     private Control CreateOptionsPanel()
     {
         var group = new GroupBox
@@ -299,7 +385,7 @@ public sealed class MainForm : Form
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
 
         var row1 = new FlowLayoutPanel
         {
@@ -337,14 +423,14 @@ public sealed class MainForm : Form
             Text = "File Limit",
             TextAlign = ContentAlignment.MiddleLeft,
             AutoSize = false,
-            Width = 150,
+            Width = 110,
             Height = 38,
             Margin = new Padding(10, 2, 4, 0)
         };
 
         _limitNumeric.Width = 110;
         _limitNumeric.Height = 38;
-        _limitNumeric.Margin = new Padding(0, 2, 0, 0);
+        _limitNumeric.Margin = new Padding(0, 2, 14, 0);
 
         row2.Controls.Add(_addTagsCheckBox);
         row2.Controls.Add(_dryRunCheckBox);
@@ -386,19 +472,39 @@ public sealed class MainForm : Form
         _pauseButton.Margin = new Padding(0, 0, 10, 0);
         _cancelButton.Margin = new Padding(0, 0, 10, 0);
         _openLogButton.Margin = new Padding(0, 0, 10, 0);
-        StyleActionButton(_runButton, Color.FromArgb(46, 125, 50), Color.White);
-        StyleActionButton(_pauseButton, Color.FromArgb(249, 168, 37), Color.Black);
-        StyleActionButton(_cancelButton, Color.FromArgb(198, 40, 40), Color.White);
-        StyleActionButton(_openLogButton, Color.FromArgb(132, 132, 132), Color.White);
-        KeepButtonTextColor(_cancelButton, Color.White);
-        KeepButtonTextColor(_openLogButton, Color.White);
+        StyleActionButton(_runButton, PhotoAiTheme.WarmBlue, PhotoAiTheme.SurfaceRaised);
+        StyleActionButton(_pauseButton, PhotoAiTheme.WarmYellow, PhotoAiTheme.Text);
+        StyleActionButton(_cancelButton, PhotoAiTheme.WarmRed, PhotoAiTheme.SurfaceRaised);
+        StyleActionButton(_openLogButton, PhotoAiTheme.WarmBlue, PhotoAiTheme.SurfaceRaised);
+        KeepButtonTextColor(_runButton, PhotoAiTheme.SurfaceRaised);
+        KeepButtonTextColor(_cancelButton, PhotoAiTheme.SurfaceRaised);
+        KeepButtonTextColor(_openLogButton, PhotoAiTheme.SurfaceRaised);
 
         panel.Controls.Add(_runButton);
         panel.Controls.Add(_pauseButton);
         panel.Controls.Add(_cancelButton);
+        var helpButton = new Button { Text = "?", Width = 44, Height = 40 };
+        helpButton.Margin = new Padding(0, 0, 10, 0);
+        helpButton.Click += (_, _) => ShowMainHelp();
+        _toolTip.SetToolTip(helpButton, "Show quick help for the main scan controls.");
         panel.Controls.Add(_openLogButton);
+        panel.Controls.Add(helpButton);
 
         return panel;
+    }
+
+    private void ShowMainHelp()
+    {
+        MessageBox.Show(this,
+            "Folder source: defaults to P:\\. When the path exists, the folder tree loads automatically.\r\n\r\n" +
+            "Selected folders: select every folder to include and unselect folders to exclude. Click the expand control on a folder to show subfolders; subfolders can also be selected, unselected, and expanded. If no tree is loaded, the typed folder source is scanned directly. Enable Subfolders to recurse within each selected folder. Internal .photoai folders are always ignored.\r\n\r\n" +
+            "Scan Existing: re-scan images with existing PhotoAI JSON.\r\n\r\n" +
+            "Overwrite XMP+: regenerate JSON and XMP together.\r\n\r\n" +
+            "Dry Run: preview without changing files or calling Ollama.\r\n\r\n" +
+            "The live log shows the 10 most recent messages; Open log shows the full run log after a live scan.",
+            "PhotoAIApp help",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
     }
 
     private static void StyleActionButton(Button button, Color backColor, Color foreColor)
@@ -585,6 +691,7 @@ public sealed class MainForm : Form
             main.Controls.Add(_tree, 0, 2);
             main.Controls.Add(buttonPanel, 0, 3);
             Controls.Add(main);
+            PhotoAiTheme.Apply(this);
 
             _tree.BeforeExpand += (_, e) => PopulateChildren(e.Node);
             _tree.AfterSelect += (_, e) => SetSelectedPath(NodePath(e.Node));
@@ -774,26 +881,130 @@ public sealed class MainForm : Form
         }
     }
 
-    private sealed record ModelPreferenceItem(string Label, PhotoAiModelPreference Preference)
+    private sealed record ProfileComboItem(PhotoAiModelProfileId ProfileId, string Label)
     {
         public override string ToString() => Label;
     }
 
-    private PhotoAiModelPreference CurrentModelPreference()
+    private void InitializeProfilePicker()
     {
-        return _modelPreferenceComboBox.SelectedItem is ModelPreferenceItem item
-            ? item.Preference
-            : PhotoAiModelPreference.QwenPcWithUnraidFallback;
+        _profileComboBox.Items.Clear();
+        foreach (PhotoAiModelProfile preset in PhotoAiModelProfile.Presets)
+        {
+            _profileComboBox.Items.Add(new ProfileComboItem(preset.ProfileId, preset.DisplayName));
+        }
+        _profileComboBox.Items.Add(new ProfileComboItem(PhotoAiModelProfileId.Custom, "Custom"));
     }
 
-    private void ApplyModelPreferenceToInputs()
+    private void LoadGuiSettings()
     {
-        bool unraidOnly = CurrentModelPreference() == PhotoAiModelPreference.UnraidMiniCpmOnly;
-        _ollamaTextBox.Enabled = !unraidOnly && _cancellationTokenSource is null;
-        _modelComboBox.Enabled = !unraidOnly && _cancellationTokenSource is null;
-        _refreshModelsButton.Enabled = !unraidOnly && _cancellationTokenSource is null;
-        _fallbackOllamaTextBox.Enabled = _cancellationTokenSource is null;
-        _fallbackModelTextBox.Enabled = _cancellationTokenSource is null;
+        _guiSettings = LoadGuiSettingsFromDisk();
+        _activeProfile = _guiSettings.EffectiveProfile;
+        SelectProfileComboItem(_guiSettings.SelectedProfileId);
+        UpdateProfileSummary();
+    }
+
+    private void ApplySelectedProfileFromCombo()
+    {
+        if (_profileComboBox.SelectedItem is not ProfileComboItem item)
+        {
+            return;
+        }
+
+        if (item.ProfileId == PhotoAiModelProfileId.Custom)
+        {
+            _activeProfile = _guiSettings.CustomProfile with { ProfileId = PhotoAiModelProfileId.Custom, DisplayName = "Custom" };
+            _guiSettings = _guiSettings.WithSelectedProfile(PhotoAiModelProfileId.Custom, _activeProfile);
+        }
+        else
+        {
+            _activeProfile = PhotoAiModelProfile.GetPreset(item.ProfileId);
+            _guiSettings = _guiSettings.WithSelectedProfile(item.ProfileId, _activeProfile);
+        }
+
+        SaveGuiSettingsToDisk(_guiSettings);
+        UpdateProfileSummary();
+    }
+
+    private async Task ShowAdvancedSettingsAsync()
+    {
+        using var dialog = new AdvancedSettingsForm(_activeProfile);
+        DialogResult result = dialog.ShowDialog(this);
+        if (result != DialogResult.OK)
+        {
+            return;
+        }
+
+        ApplyProfile(dialog.SelectedProfile);
+        await Task.CompletedTask;
+    }
+
+    private void ApplyProfile(PhotoAiModelProfile profile)
+    {
+        PhotoAiModelProfileId matchedProfile = PhotoAiModelProfile.MatchPreset(profile);
+        _activeProfile = matchedProfile == PhotoAiModelProfileId.Custom
+            ? profile with { ProfileId = PhotoAiModelProfileId.Custom, DisplayName = "Custom" }
+            : PhotoAiModelProfile.GetPreset(matchedProfile);
+        _guiSettings = _guiSettings.WithSelectedProfile(matchedProfile, _activeProfile);
+        SelectProfileComboItem(matchedProfile);
+        SaveGuiSettingsToDisk(_guiSettings);
+        UpdateProfileSummary();
+    }
+
+    private void SelectProfileComboItem(PhotoAiModelProfileId profileId)
+    {
+        for (int i = 0; i < _profileComboBox.Items.Count; i++)
+        {
+            if (_profileComboBox.Items[i] is ProfileComboItem item && item.ProfileId == profileId)
+            {
+                _profileComboBox.SelectedIndex = i;
+                return;
+            }
+        }
+
+        _profileComboBox.SelectedIndex = 0;
+    }
+
+    private void UpdateProfileSummary()
+    {
+        _profileSummaryLabel.Text = _activeProfile.Summary;
+    }
+
+    private static string GuiSettingsPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "PhotoAIApp",
+        "settings.json");
+
+    private static PhotoAiGuiSettings LoadGuiSettingsFromDisk()
+    {
+        try
+        {
+            if (!File.Exists(GuiSettingsPath))
+            {
+                return new PhotoAiGuiSettings();
+            }
+
+            string json = File.ReadAllText(GuiSettingsPath);
+            return JsonSerializer.Deserialize<PhotoAiGuiSettings>(json) ?? new PhotoAiGuiSettings();
+        }
+        catch
+        {
+            return new PhotoAiGuiSettings();
+        }
+    }
+
+    private static void SaveGuiSettingsToDisk(PhotoAiGuiSettings settings)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(GuiSettingsPath)!);
+            string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(GuiSettingsPath, json);
+        }
+        catch
+        {
+            // Settings persistence is best-effort; scan execution should not depend on it.
+        }
     }
 
     private void TogglePause()
@@ -817,77 +1028,230 @@ public sealed class MainForm : Form
         }
     }
 
-    private async Task RefreshModelsAsync()
+    private void ScheduleFolderTreeAutoLoad()
     {
-        string ollamaBaseUrl = _ollamaTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(ollamaBaseUrl))
+        _folderTreeAutoLoadTimer.Stop();
+        _folderTreeAutoLoadTimer.Start();
+    }
+
+    private void AutoLoadSelectableFoldersIfAvailable()
+    {
+        string parentFolder = _selectedFolderTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(parentFolder) || !Directory.Exists(parentFolder))
         {
-            MessageBox.Show(this, "Ollama URL is required.", "PhotoAI", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _selectedFoldersTreeView.Nodes.Clear();
             return;
         }
 
-        _refreshModelsButton.Enabled = false;
-        AppendLog($"Querying Ollama models from {ollamaBaseUrl}...");
+        LoadSelectableFolders(showErrors: false);
+    }
+
+    private void LoadSelectableFolders(bool showErrors = true)
+    {
+        string parentFolder = _selectedFolderTextBox.Text.Trim();
 
         try
         {
-            var scanner = new PhotoAiScanner();
-            string currentModel = _modelComboBox.Text.Trim();
-            string[] models = await scanner.GetAvailableOllamaModelsAsync(ollamaBaseUrl);
-
-            _modelComboBox.Items.Clear();
-            _modelComboBox.Items.AddRange(models.Cast<object>().ToArray());
-
-            if (models.Length == 0)
-            {
-                AppendLog("No Ollama models were returned.");
-                return;
-            }
-
-            string modelToSelect = models.Contains(currentModel, StringComparer.OrdinalIgnoreCase)
-                ? currentModel
-                : models.Contains(PhotoAiDefaults.Model, StringComparer.OrdinalIgnoreCase)
-                    ? PhotoAiDefaults.Model
-                    : models[0];
-
-            _modelComboBox.Text = modelToSelect;
-            AppendLog($"Loaded {models.Length} Ollama model(s). Selected: {modelToSelect}");
+            PhotoAiFolderSelection.NormalizeAndValidateSelectedFolders([parentFolder]);
+            _selectedFoldersTreeView.Nodes.Clear();
+            TreeNode rootNode = CreateFolderTreeNode(parentFolder, isChecked: true);
+            _selectedFoldersTreeView.Nodes.Add(rootNode);
+            LoadSubfolderNodes(rootNode);
+            rootNode.Expand();
         }
         catch (Exception ex)
         {
-            AppendLog($"Failed to query Ollama models: {ex.Message}");
-            MessageBox.Show(this, ex.Message, "Ollama model query failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _selectedFoldersTreeView.Nodes.Clear();
+            if (showErrors)
+            {
+                MessageBox.Show(this, ex.Message, "Could not load folder tree", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+    }
+
+    private TreeNode CreateFolderTreeNode(string folderPath, bool isChecked = false)
+    {
+        string fullPath = Path.GetFullPath(folderPath);
+        string label = Path.GetFileName(fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            label = fullPath;
+        }
+
+        var node = new TreeNode(label)
+        {
+            Tag = fullPath,
+            Checked = isChecked
+        };
+
+        if (HasChildFolders(fullPath))
+        {
+            node.Nodes.Add(new TreeNode("Loading...") { Tag = null });
+        }
+
+        return node;
+    }
+
+    private void LoadSubfolderNodes(TreeNode? node)
+    {
+        if (node?.Tag is not string folderPath || !Directory.Exists(folderPath))
+        {
+            return;
+        }
+
+        if (node.Nodes.Count == 1 && node.Nodes[0].Tag is null && node.Nodes[0].Text == "Loading...")
+        {
+            node.Nodes.Clear();
+        }
+        else if (node.Nodes.Count > 0)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (string childFolder in Directory.EnumerateDirectories(folderPath).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            {
+                node.Nodes.Add(CreateFolderTreeNode(childFolder, isChecked: node.Checked));
+            }
+        }
+        catch
+        {
+            // Ignore folders Windows cannot enumerate; they simply cannot be selected from this tree.
+        }
+    }
+
+    private static bool HasChildFolders(string folderPath)
+    {
+        try
+        {
+            return Directory.EnumerateDirectories(folderPath).Any();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void SetAllSelectableFoldersChecked(bool isChecked)
+    {
+        foreach (TreeNode node in _selectedFoldersTreeView.Nodes)
+        {
+            SetNodeAndLoadedChildrenChecked(node, isChecked);
+        }
+    }
+
+    private void ApplyCheckedStateToDescendants(TreeNode node, bool isChecked)
+    {
+        if (_updatingFolderCheckState)
+        {
+            return;
+        }
+
+        try
+        {
+            _updatingFolderCheckState = true;
+            SetNodeAndLoadedChildrenChecked(node, isChecked);
         }
         finally
         {
-            _refreshModelsButton.Enabled = true;
+            _updatingFolderCheckState = false;
         }
+    }
+
+    private static void SetNodeAndLoadedChildrenChecked(TreeNode node, bool isChecked)
+    {
+        node.Checked = isChecked;
+        foreach (TreeNode childNode in node.Nodes)
+        {
+            if (childNode.Tag is string)
+            {
+                SetNodeAndLoadedChildrenChecked(childNode, isChecked);
+            }
+        }
+    }
+
+    private string[] GetCheckedFolderPaths()
+    {
+        var folders = new List<string>();
+        foreach (TreeNode node in _selectedFoldersTreeView.Nodes)
+        {
+            AddCheckedFolderPaths(node, folders);
+        }
+        return folders.ToArray();
+    }
+
+    private static void AddCheckedFolderPaths(TreeNode node, List<string> folders)
+    {
+        if (node.Tag is string folderPath && node.Checked)
+        {
+            folders.Add(folderPath);
+        }
+
+        foreach (TreeNode childNode in node.Nodes)
+        {
+            if (childNode.Tag is string)
+            {
+                AddCheckedFolderPaths(childNode, folders);
+            }
+        }
+    }
+
+    private string[] GetSelectedFoldersForRun(string selectedFolder)
+    {
+        IEnumerable<string?> selectedFolders = _selectedFoldersTreeView.Nodes.Count > 0
+            ? GetCheckedFolderPaths()
+            : [selectedFolder];
+
+        return PhotoAiFolderSelection.NormalizeAndValidateSelectedFolders(selectedFolders);
+    }
+
+    private static int CountAggregateCandidateImages(IEnumerable<string> selectedFolders, bool recursive, int? perFolderLimit)
+    {
+        int total = 0;
+        foreach (string folder in selectedFolders)
+        {
+            total += CountCandidateImages(folder, recursive, perFolderLimit);
+        }
+
+        return total;
+    }
+
+    private static int CountCandidateImages(string folderPath, bool recursive, int? limit)
+    {
+        SearchOption searchOption = recursive
+            ? SearchOption.AllDirectories
+            : SearchOption.TopDirectoryOnly;
+
+        int count = 0;
+        foreach (string path in Directory.EnumerateFiles(folderPath, "*.*", searchOption)
+            .Where(path => !PhotoAiScanner.IsInExcludedScanDirectory(path, folderPath))
+            .Where(path => PhotoAiDefaults.SupportedExtensions.Contains(
+                Path.GetExtension(path),
+                StringComparer.OrdinalIgnoreCase)))
+        {
+            count++;
+            if (limit is > 0 && count >= limit.Value)
+            {
+                break;
+            }
+        }
+
+        return count;
     }
 
     private async Task RunScanAsync()
     {
         string selectedFolder = _selectedFolderTextBox.Text.Trim();
-        string libraryRoot = _libraryRootTextBox.Text.Trim();
+        string[] selectedFolders;
 
-        if (string.IsNullOrWhiteSpace(selectedFolder) || !Directory.Exists(selectedFolder))
+        try
         {
-            MessageBox.Show(this, "Selected folder does not exist.", "PhotoAI", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            selectedFolders = GetSelectedFoldersForRun(selectedFolder);
         }
-
-        if (string.IsNullOrWhiteSpace(libraryRoot) || !Directory.Exists(libraryRoot))
+        catch (Exception ex)
         {
-            MessageBox.Show(this, "Immich library root / safety root does not exist.", "PhotoAI", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        if (!PhotoAiScanner.IsPathUnderRoot(selectedFolder, libraryRoot))
-        {
-            MessageBox.Show(this,
-                "Selected folder must be inside the Immich library root / safety root.",
-                "Safety check failed",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+            MessageBox.Show(this, ex.Message, "PhotoAI folder selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -904,7 +1268,11 @@ public sealed class MainForm : Form
 
         var progress = new Progress<PhotoAiScanProgress>(item =>
         {
-            AppendLog(item.Message);
+            CaptureRunLogPath(item);
+            if (!string.Equals(item.EventName, "PROCESS", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLog(item.Message);
+            }
             if (item.Snapshot is not null)
             {
                 ApplyProgressSnapshot(item.Snapshot);
@@ -914,41 +1282,92 @@ public sealed class MainForm : Form
 
         try
         {
-            PhotoAiScanSummary summary = await scanner.ScanFolderAsync(
-                new PhotoAiScanOptions
-                {
-                    FolderPath = selectedFolder,
-                    SafetyRootPath = libraryRoot,
-                    Recursive = _recursiveCheckBox.Checked,
-                    Force = _forceCheckBox.Checked,
-                    WriteJson = true,
-                    WriteXmp = true,
-                    OverwriteJson = _overwriteSidecarsCheckBox.Checked,
-                    OverwriteXmp = _overwriteSidecarsCheckBox.Checked,
-                    AddTags = _addTagsCheckBox.Checked,
-                    DryRun = _dryRunCheckBox.Checked,
-                    OllamaBaseUrl = _ollamaTextBox.Text.Trim(),
-                    Model = _modelComboBox.Text.Trim(),
-                    ModelPreference = CurrentModelPreference(),
-                    FallbackOllamaBaseUrl = _fallbackOllamaTextBox.Text.Trim(),
-                    FallbackModel = _fallbackModelTextBox.Text.Trim(),
-                    PauseController = _pauseController,
-                    Limit = _limitNumeric.Value > 0 ? (int)_limitNumeric.Value : null
-                },
-                progress,
-                _cancellationTokenSource.Token);
+            int? perFolderLimit = _limitNumeric.Value > 0 ? (int)_limitNumeric.Value : null;
+            DateTimeOffset aggregateStartTime = DateTimeOffset.Now;
+            int aggregateTotalFiles = CountAggregateCandidateImages(selectedFolders, _recursiveCheckBox.Checked, perFolderLimit);
+            int aggregateCompletedOffset = 0;
+            int aggregateSkippedOffset = 0;
+            int aggregateFailedOffset = 0;
+            int aggregatePrimaryRetryAttemptsOffset = 0;
+            int aggregateFallbackAttemptsOffset = 0;
 
-            _lastRunLogPath = summary.RunLogPath;
+            if (selectedFolders.Length > 1)
+            {
+                AppendLog($"Queued {aggregateTotalFiles} image files across {selectedFolders.Length} selected folders.");
+            }
+
+            var summaries = new List<PhotoAiScanSummary>();
+            for (int index = 0; index < selectedFolders.Length; index++)
+            {
+                string folder = selectedFolders[index];
+                AppendLog(selectedFolders.Length == 1
+                    ? $"Starting scan: {folder}"
+                    : $"Starting folder {index + 1}/{selectedFolders.Length}: {folder}");
+
+                PhotoAiScanSummary folderSummary = await scanner.ScanFolderAsync(
+                    new PhotoAiScanOptions
+                    {
+                        FolderPath = folder,
+                        SafetyRootPath = null,
+                        Recursive = _recursiveCheckBox.Checked,
+                        Force = _forceCheckBox.Checked,
+                        WriteJson = true,
+                        WriteXmp = true,
+                        OverwriteJson = _overwriteSidecarsCheckBox.Checked,
+                        OverwriteXmp = _overwriteSidecarsCheckBox.Checked,
+                        AddTags = _addTagsCheckBox.Checked,
+                        DryRun = _dryRunCheckBox.Checked,
+                        OllamaBaseUrl = _activeProfile.OllamaBaseUrl,
+                        Model = _activeProfile.Model,
+                        ModelPreference = _activeProfile.ModelPreference,
+                        FallbackOllamaBaseUrl = _activeProfile.FallbackOllamaBaseUrl,
+                        FallbackModel = _activeProfile.FallbackModel,
+                        MaxImageDimensionPixels = _activeProfile.MaxImageDimensionPixels,
+                        FallbackMaxImageDimensionPixels = _activeProfile.FallbackMaxImageDimensionPixels,
+                        PauseController = _pauseController,
+                        Limit = perFolderLimit,
+                        UnloadModelsAtEnd = index == selectedFolders.Length - 1,
+                        ProgressCompletedOffset = aggregateCompletedOffset,
+                        ProgressSkippedOffset = aggregateSkippedOffset,
+                        ProgressFailedOffset = aggregateFailedOffset,
+                        ProgressPrimaryRetryAttemptsOffset = aggregatePrimaryRetryAttemptsOffset,
+                        ProgressFallbackAttemptsOffset = aggregateFallbackAttemptsOffset,
+                        ProgressTotalFiles = selectedFolders.Length > 1 ? aggregateTotalFiles : null,
+                        ProgressStartedAt = selectedFolders.Length > 1 ? aggregateStartTime : null
+                    },
+                    progress,
+                    _cancellationTokenSource.Token);
+                summaries.Add(folderSummary);
+                aggregateCompletedOffset += folderSummary.DryRun ? folderSummary.WouldProcess : folderSummary.Completed;
+                aggregateSkippedOffset += folderSummary.Skipped;
+                aggregateFailedOffset += folderSummary.Failed;
+                aggregatePrimaryRetryAttemptsOffset += folderSummary.PrimaryRetryAttempts;
+                aggregateFallbackAttemptsOffset += folderSummary.FallbackAttempts;
+            }
+
+            PhotoAiScanSummary summary = summaries.Count == 1
+                ? summaries[0]
+                : PhotoAiScanSummary.Combine(summaries);
+
+            if (summaries.Count > 1 && !summary.DryRun)
+            {
+                await AppendAggregateRunCompleteAsync(summary, summaries, _cancellationTokenSource.Token);
+            }
+
+            _lastRunLogPath = summaries.LastOrDefault(summary => !summary.DryRun && File.Exists(summary.RunLogPath))?.RunLogPath;
             _openLogButton.Enabled = !summary.DryRun && File.Exists(_lastRunLogPath);
 
             PhotoAiRunSummaryDocument summaryDocument = PhotoAiRunSummaryDocument.FromSummary(summary);
             AppendLog("Scan complete. Summary opened in a separate window.");
             _statusTimer.Stop();
+            SetRunningState(false);
+            ClearLiveStatus();
             ShowRunSummary(summaryDocument, summary.RunLogPath, summary.DryRun);
         }
         catch (OperationCanceledException)
         {
             AppendLog("Cancelled by user.");
+            EnableLastRunLogIfAvailable();
         }
         catch (Exception ex)
         {
@@ -974,16 +1393,11 @@ public sealed class MainForm : Form
         _pauseButton.Enabled = running;
         _pauseButton.Text = "Pause";
         _cancelButton.Enabled = running;
-        _browseLibraryRootButton.Enabled = !running;
         _browseSelectedFolderButton.Enabled = !running;
-        _libraryRootTextBox.Enabled = !running;
+        _selectedFoldersTreeView.Enabled = !running;
         _selectedFolderTextBox.Enabled = !running;
-        _ollamaTextBox.Enabled = !running && CurrentModelPreference() != PhotoAiModelPreference.UnraidMiniCpmOnly;
-        _modelComboBox.Enabled = !running && CurrentModelPreference() != PhotoAiModelPreference.UnraidMiniCpmOnly;
-        _modelPreferenceComboBox.Enabled = !running;
-        _fallbackOllamaTextBox.Enabled = !running;
-        _fallbackModelTextBox.Enabled = !running;
-        _refreshModelsButton.Enabled = !running && CurrentModelPreference() != PhotoAiModelPreference.UnraidMiniCpmOnly;
+        _profileComboBox.Enabled = !running;
+        _advancedSettingsButton.Enabled = !running;
         _recursiveCheckBox.Enabled = !running;
         _forceCheckBox.Enabled = !running;
         _overwriteSidecarsCheckBox.Enabled = !running;
@@ -1005,13 +1419,14 @@ public sealed class MainForm : Form
         }
 
         _recentStatusLines.Add(message);
-        while (_recentStatusLines.Count > 5)
+        while (_recentStatusLines.Count > 10)
         {
             _recentStatusLines.RemoveAt(0);
         }
 
         _logTextBox.Lines = _recentStatusLines.ToArray();
         _logTextBox.SelectionStart = _logTextBox.TextLength;
+        _logTextBox.SelectionLength = 0;
         _logTextBox.ScrollToCaret();
     }
 
@@ -1023,6 +1438,8 @@ public sealed class MainForm : Form
         _remainingValueLabel.Text = string.Empty;
         _etaValueLabel.Text = string.Empty;
         _countsValueLabel.Text = string.Empty;
+        _primaryRetryValueLabel.Text = string.Empty;
+        _fallbackValueLabel.Text = string.Empty;
         _progressBar.Style = ProgressBarStyle.Marquee;
         _progressBar.Value = 0;
     }
@@ -1036,6 +1453,8 @@ public sealed class MainForm : Form
         _remainingValueLabel.Text = string.Empty;
         _etaValueLabel.Text = string.Empty;
         _countsValueLabel.Text = string.Empty;
+        _primaryRetryValueLabel.Text = string.Empty;
+        _fallbackValueLabel.Text = string.Empty;
         _progressBar.Style = ProgressBarStyle.Continuous;
         _progressBar.Value = 0;
     }
@@ -1053,10 +1472,17 @@ public sealed class MainForm : Form
         _startTimeValueLabel.Text = FormatSummaryTimestamp(snapshot.StartedAt);
         _elapsedValueLabel.Text = FormatSummaryDuration(snapshot.Elapsed);
         _remainingValueLabel.Text = snapshot.EstimatedRemainingDisplay;
-        _etaValueLabel.Text = snapshot.EstimatedFinishTimeDisplay;
+        _etaValueLabel.Text = snapshot.EstimatedFinishTime is null
+            ? snapshot.EstimatedFinishTimeDisplay
+            : FormatSummaryTimestamp(snapshot.EstimatedFinishTime);
 
         string total = snapshot.TotalFiles?.ToString() ?? "?";
-        _countsValueLabel.Text = $"{snapshot.FilesFinished} / {total}";
+        string percent = snapshot.ProgressFraction is null
+            ? string.Empty
+            : $" ({(int)Math.Round(snapshot.ProgressFraction.Value)}%)";
+        _countsValueLabel.Text = $"{snapshot.FilesFinished} / {total}{percent}";
+        _primaryRetryValueLabel.Text = snapshot.PrimaryRetryAttempts.ToString();
+        _fallbackValueLabel.Text = snapshot.FallbackAttempts.ToString();
 
         if (snapshot.IsIndeterminate || snapshot.ProgressFraction is null)
         {
@@ -1092,7 +1518,23 @@ public sealed class MainForm : Form
     {
         return timestamp is null
             ? "n/a"
-            : timestamp.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz");
+            : $"{timestamp.Value.ToLocalTime():yyyy-MM-dd HH:mm:ss} {FormatLocalTimeZoneAbbreviation(timestamp.Value)}";
+    }
+
+    private static string FormatLocalTimeZoneAbbreviation(DateTimeOffset timestamp)
+    {
+        TimeZoneInfo local = TimeZoneInfo.Local;
+        string displayName = local.IsDaylightSavingTime(timestamp) ? local.DaylightName : local.StandardName;
+        if (displayName.Contains("Mountain", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MST";
+        }
+
+        string abbreviation = string.Concat(displayName
+            .Split([' ', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(part => part.Length > 0 && char.IsLetter(part[0]))
+            .Select(part => char.ToUpperInvariant(part[0])));
+        return string.IsNullOrWhiteSpace(abbreviation) ? local.Id : abbreviation;
     }
 
     private static string FormatSummaryDuration(TimeSpan duration)
@@ -1100,6 +1542,48 @@ public sealed class MainForm : Form
         return duration.TotalHours >= 1
             ? $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}"
             : $"{duration.Minutes:00}:{duration.Seconds:00}";
+    }
+
+    private static string FormatAverageSecondsPerPhoto(TimeSpan duration)
+    {
+        double seconds = duration < TimeSpan.Zero ? 0.0 : duration.TotalSeconds;
+        return $"{seconds:F1} seconds";
+    }
+
+    private static async Task AppendAggregateRunCompleteAsync(PhotoAiScanSummary summary, IReadOnlyList<PhotoAiScanSummary> folderSummaries, CancellationToken cancellationToken)
+    {
+        string? runLogPath = folderSummaries.LastOrDefault(item => !item.DryRun && File.Exists(item.RunLogPath))?.RunLogPath;
+        if (string.IsNullOrWhiteSpace(runLogPath))
+        {
+            return;
+        }
+
+        string[] lines =
+        [
+            string.Empty,
+            $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}] AGGREGATE RUN COMPLETE",
+            $"  selected_folders={folderSummaries.Count}",
+            $"  images_found={summary.ImagesFound}",
+            $"  start_time={FormatSummaryTimestamp(summary.StartTime)}",
+            $"  stop_time={FormatSummaryTimestamp(summary.StopTime)}",
+            $"  elapsed={FormatSummaryDuration(summary.ElapsedTime)}",
+            $"  average_time_per_processed_photo={FormatAverageSecondsPerPhoto(summary.AverageTimePerProcessedPhoto)}",
+            $"  completed={summary.Completed}",
+            $"  skipped={summary.Skipped}",
+            $"  failed={summary.Failed}",
+            $"  parse_xmp_skipped={summary.ParseFailed}",
+            $"  xmp_written={summary.XmpWritten}",
+            $"  json_write_skipped={summary.JsonWriteSkipped}",
+            $"  xmp_write_skipped={summary.XmpWriteSkipped}",
+            $"  model_failures={summary.ModelFailures}",
+            $"  primary_retry_attempts={summary.PrimaryRetryAttempts}",
+            $"  primary_retry_successes={summary.PrimaryRetrySucceeded}",
+            $"  primary_retry_failures={summary.PrimaryRetryFailed}",
+            $"  fallback_attempts={summary.FallbackAttempts}",
+            $"  fallback_successes={summary.FallbackSucceeded}"
+        ];
+
+        await File.AppendAllTextAsync(runLogPath, string.Join(Environment.NewLine, lines) + Environment.NewLine, cancellationToken);
     }
 
     private static string GetDisplayVersion()
@@ -1116,6 +1600,28 @@ public sealed class MainForm : Form
         return string.IsNullOrWhiteSpace(version) ? "dev" : version;
     }
 
+    private void CaptureRunLogPath(PhotoAiScanProgress progress)
+    {
+        const string prefix = "Anomaly log: ";
+        if (!progress.Message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string path = progress.Message[prefix.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        _lastRunLogPath = path;
+    }
+
+    private void EnableLastRunLogIfAvailable()
+    {
+        _openLogButton.Enabled = !string.IsNullOrWhiteSpace(_lastRunLogPath) && File.Exists(_lastRunLogPath);
+    }
+
     private void OpenLastRunLog()
     {
         if (string.IsNullOrWhiteSpace(_lastRunLogPath) || !File.Exists(_lastRunLogPath))
@@ -1124,11 +1630,18 @@ public sealed class MainForm : Form
             return;
         }
 
-        Process.Start(new ProcessStartInfo
+        try
         {
-            FileName = _lastRunLogPath,
-            UseShellExecute = true
-        });
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = _lastRunLogPath,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not open the anomaly log.\r\n\r\n{_lastRunLogPath}\r\n\r\n{ex.Message}", "PhotoAI", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private sealed class RunSummaryForm : Form
@@ -1204,6 +1717,7 @@ public sealed class MainForm : Form
             AcceptButton = closeButton;
             CancelButton = closeButton;
             Controls.Add(main);
+            PhotoAiTheme.Apply(this);
         }
 
         private void SaveSummaryTextAs()

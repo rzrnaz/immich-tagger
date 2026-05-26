@@ -6,35 +6,49 @@ PhotoAIApp is a Windows/.NET tool for generating PhotoAI audit sidecars and Immi
 
 Release page:
 
-https://github.com/rzrnaz/PhotoAIApp/releases/tag/v0.1.0
+https://github.com/rzrnaz/PhotoAIApp/releases/tag/v0.1.31
 
-Self-contained Windows zip:
+Windows GUI assets:
 
-https://github.com/rzrnaz/PhotoAIApp/releases/download/v0.1.0/PhotoAIApp_Windows_EXE_SelfContained.zip
+- Self-contained publish ZIP: `PhotoAIApp_v0.1.31_AggregateSummaryPolish_win-x64_self-contained.zip`
+- Standalone executable: `PhotoAIApp.Gui_v0.1.31_AggregateSummaryPolish_win-x64_self-contained.exe`
 
-The release zip contains:
+The ZIP contains the Windows GUI executable at:
 
-- GUI executable: `publish\PhotoAIApp-gui-win-x64-self-contained\PhotoAIApp.Gui.exe`
-- CLI executable: `publish\PhotoAIApp-cli-win-x64-self-contained\PhotoAIApp.exe`
+```text
+PhotoAIApp.Gui.exe
+```
 
 ## Current features
 
-- WinForms GUI for selecting an Immich/library safety root and a specific folder to scan.
+- WinForms GUI for selecting one folder or checkbox-selected multiple folders from a folder tree.
+- Folder source defaults to `P:\` and auto-loads the folder tree when available.
 - Dry-run/preview mode before touching production folders.
-- Writes internal `.photoai.json` audit sidecars.
+- Estimated dry-run processing time based only on files that would actually be processed.
+- Writes compact internal `.photoai` JSON audit sidecars.
 - Writes Immich-style `original-file.ext.xmp` sidecars.
+- Preserves protected/existing descriptions unless overwrite behavior is intentionally enabled.
 - Optional XMP keyword/tag fields via **Add Tags**.
-- Preferred model policy:
-  - Qwen PC preferred with Unraid MiniCPM-V fallback.
-  - Unraid MiniCPM-V only with no fallback.
+- Preset-first AI settings with an Advanced settings dialog:
+  - High Quality: local `qwen2.5vl:7b` full-resolution path.
+  - Balanced: local `qwen2.5vl:7b` 1440px path.
+  - Compatibility: Unraid `minicpm-v:latest` path.
+  - Custom primary/fallback endpoint and model settings.
+- Qwen primary retry hardening for transient Ollama input-ingestion failures before fallback.
+- Unraid MiniCPM-V fallback support.
 - Pause/resume for long runs, separate from Stop/cancel.
-- Safe in-app folder picker that only selects folders and does not expose Windows shell delete/rename commands.
+- Aggregate progress, ETA, retry/fallback counters, summaries, and logs across multi-folder runs.
+- Final summaries and anomaly logs include combined multi-folder totals and one-decimal average seconds per processed photo.
+- Live GUI log is human-readable, auto-scrolls to the newest entry, and avoids noisy repeated process lines.
+- `Open Log` stays available for completion/cancellation paths when an anomaly log exists.
+- Custom PhotoAI app icon and warm minimalist GUI theme.
+- Scanner excludes internal `.photoai`, `.Recycle.Bin`, and `@eaDir` folders.
 
 ## Safety model
 
-The selected scan folder must be under the configured library/safety root. Use **Dry Run** first when testing a production folder.
+Use **Dry Run** first when testing a production folder. PhotoAIApp excludes its own `.photoai` folders so generated audit sidecars are not recursively scanned.
 
-For Immich, after creating new sidecars, run metadata sidecar **Discover**, then **Sync** if needed.
+For Immich, after creating new sidecars beside already-known external-library assets, run metadata sidecar **Discover** first so Immich associates the new XMP files. Use **Sync** later for edits to sidecars Immich already knows about.
 
 ## Development
 
@@ -49,4 +63,10 @@ For a standalone Windows GUI executable:
 
 ```powershell
 dotnet publish .\PhotoAIApp.Gui\PhotoAIApp.Gui.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish\PhotoAIApp-gui-win-x64-self-contained
+```
+
+When publishing from Linux, add Windows targeting:
+
+```bash
+dotnet publish ./PhotoAIApp.Gui/PhotoAIApp.Gui.csproj -c Release -r win-x64 --self-contained true -p:EnableWindowsTargeting=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/PhotoAIApp-gui-win-x64-self-contained
 ```

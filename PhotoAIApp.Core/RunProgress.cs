@@ -25,6 +25,8 @@ public sealed record PhotoAiRunProgressSnapshot
     public required int CompletedFiles { get; init; }
     public required int SkippedFiles { get; init; }
     public required int FailedFiles { get; init; }
+    public required int PrimaryRetryAttempts { get; init; }
+    public required int FallbackAttempts { get; init; }
     public required TimeSpan Elapsed { get; init; }
     public required TimeSpan? EstimatedRemaining { get; init; }
     public required DateTimeOffset? EstimatedFinishTime { get; init; }
@@ -55,7 +57,9 @@ public sealed record PhotoAiRunProgressSnapshot
         int? totalFiles,
         int completedFiles,
         int skippedFiles,
-        int failedFiles)
+        int failedFiles,
+        int primaryRetryAttempts = 0,
+        int fallbackAttempts = 0)
     {
         if (now < startedAt)
         {
@@ -65,6 +69,8 @@ public sealed record PhotoAiRunProgressSnapshot
         completedFiles = Math.Max(0, completedFiles);
         skippedFiles = Math.Max(0, skippedFiles);
         failedFiles = Math.Max(0, failedFiles);
+        primaryRetryAttempts = Math.Max(0, primaryRetryAttempts);
+        fallbackAttempts = Math.Max(0, fallbackAttempts);
         totalFiles = totalFiles is null ? null : Math.Max(0, totalFiles.Value);
 
         TimeSpan elapsed = now - startedAt;
@@ -93,6 +99,8 @@ public sealed record PhotoAiRunProgressSnapshot
             CompletedFiles = completedFiles,
             SkippedFiles = skippedFiles,
             FailedFiles = failedFiles,
+            PrimaryRetryAttempts = primaryRetryAttempts,
+            FallbackAttempts = fallbackAttempts,
             Elapsed = elapsed,
             EstimatedRemaining = estimatedRemaining,
             EstimatedFinishTime = estimatedFinishTime

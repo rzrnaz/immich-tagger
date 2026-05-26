@@ -1,7 +1,11 @@
 using System.Net.Http.Json;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Processing;
 
 namespace PhotoAIApp.Core;
 
@@ -54,9 +58,9 @@ public sealed class PhotoAiScanner
             progress,
             "RUN START",
             $"Scan root: {rootPath}",
-            snapshot: BuildProgressSnapshot(summary, PhotoAiRunState.Scanning, "Scanning folder", totalFiles: null));
+            snapshot: BuildProgressSnapshot(summary, options, PhotoAiRunState.Scanning, "Scanning folder", totalFiles: null));
         Report(progress, "INFO", $"Safety root: {safetyRootPath}");
-        Report(progress, "INFO", $"Subfolders: {options.Recursive}; Scan Existing: {options.Force}; Overwrite sidecars JSON+XMP: {options.OverwriteSidecars}; Add tags: {options.AddTags}; Dry run: {options.DryRun}; Model preference: {options.ModelPreference}; Primary: {primaryEndpoint.Model} @ {primaryEndpoint.OllamaBaseUrl}; Fallback: {(modelEndpoints.Length > 1 ? $"{modelEndpoints[1].Model} @ {modelEndpoints[1].OllamaBaseUrl}" : "none")}");
+        Report(progress, "INFO", $"Subfolders: {options.Recursive}; Scan Existing: {options.Force}; Overwrite sidecars JSON+XMP: {options.OverwriteSidecars}; Add tags: {options.AddTags}; Dry run: {options.DryRun}; Max Image Size: {FormatMaxImageDimension(options.MaxImageDimensionPixels)}; Fallback Max Image Size: {FormatMaxImageDimension(options.FallbackMaxImageDimensionPixels)}; Model preference: {options.ModelPreference}; Primary: {primaryEndpoint.Model} @ {primaryEndpoint.OllamaBaseUrl}; Fallback: {(modelEndpoints.Length > 1 ? $"{modelEndpoints[1].Model} @ {modelEndpoints[1].OllamaBaseUrl}" : "none")}");
 
         if (options.DryRun)
         {
@@ -81,6 +85,10 @@ public sealed class PhotoAiScanner
                 $"model_preference={options.ModelPreference}",
                 $"fallback_ollama={(modelEndpoints.Length > 1 ? modelEndpoints[1].OllamaBaseUrl : "none")}",
                 $"fallback_model={(modelEndpoints.Length > 1 ? modelEndpoints[1].Model : "none")}",
+                $"max_image_dimension_pixels={options.MaxImageDimensionPixels}",
+                $"max_image_dimension_label={FormatMaxImageDimension(options.MaxImageDimensionPixels)}",
+                $"fallback_max_image_dimension_pixels={options.FallbackMaxImageDimensionPixels}",
+                $"fallback_max_image_dimension_label={FormatMaxImageDimension(options.FallbackMaxImageDimensionPixels)}",
                 $"limit={options.Limit?.ToString() ?? "none"}"
             }, cancellationToken);
         }
@@ -91,6 +99,7 @@ public sealed class PhotoAiScanner
 
         List<string> imagePaths = Directory
             .EnumerateFiles(rootPath, "*.*", searchOption)
+            .Where(path => !IsInExcludedScanDirectory(path, rootPath))
             .Where(path => PhotoAiDefaults.SupportedExtensions.Contains(
                 Path.GetExtension(path),
                 StringComparer.OrdinalIgnoreCase
@@ -105,6 +114,7 @@ public sealed class PhotoAiScanner
             $"Images found: {imagePaths.Count}",
             snapshot: BuildProgressSnapshot(
                 summary,
+                options,
                 options.DryRun ? PhotoAiRunState.DryRunning : PhotoAiRunState.Running,
                 options.DryRun ? "Dry run preview" : "Generating descriptions",
                 imagePaths.Count));
@@ -123,8 +133,8 @@ public sealed class PhotoAiScanner
                 await AppendRunLogAsync(runLogPath, "NO SUPPORTED IMAGES", new[]
                 {
                     $"scan_root={rootPath}",
-                    $"start_time={summary.StartTime:O}",
-                    $"stop_time={summary.StopTime.Value:O}",
+                    $"start_time={FormatTimestamp(summary.StartTime)}",
+                    $"stop_time={FormatTimestamp(summary.StopTime)}",
                     $"elapsed={FormatDuration(summary.ElapsedTime)}"
                 }, cancellationToken);
             }
@@ -139,7 +149,7 @@ public sealed class PhotoAiScanner
                 progress,
                 "DRY RUN COMPLETE",
                 "Preview complete. No files were written.",
-                snapshot: BuildProgressSnapshot(summary, PhotoAiRunState.Completed, "Dry run complete", imagePaths.Count));
+                snapshot: BuildProgressSnapshot(summary, options, PhotoAiRunState.Completed, "Dry run complete", imagePaths.Count));
             foreach (string summaryLine in BuildDryRunSummaryLines(summary))
             {
                 Report(progress, "SUMMARY", summaryLine);
@@ -190,9 +200,9 @@ public sealed class PhotoAiScanner
                 Report(
                     progress,
                     "SKIP",
-                    $"SKIP existing PhotoAI sidecar and Scan Existing is off: {Path.GetFileName(fullImagePath)}",
+                    $"SKIP {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: existing PhotoAI sidecar and Scan Existing is off: {Path.GetFileName(fullImagePath)}",
                     fullImagePath,
-                    BuildProgressSnapshot(summary, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
+                    BuildProgressSnapshot(summary, options, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
                 continue;
             }
 
@@ -212,17 +222,17 @@ public sealed class PhotoAiScanner
                 Report(
                     progress,
                     "SKIP",
-                    $"SKIP {displayIndex}/{imagePaths.Count}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call is needed: {fullImagePath}",
+                    $"SKIP {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call is needed: {fullImagePath}",
                     fullImagePath,
-                    BuildProgressSnapshot(summary, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
+                    BuildProgressSnapshot(summary, options, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
                 continue;
             }
 
-            Report(progress, "PROCESS", $"PROCESS {displayIndex}/{imagePaths.Count}: {fullImagePath}", fullImagePath);
+            Report(progress, "PROCESS", $"PROCESS {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: true)}: {fullImagePath}", fullImagePath);
 
             try
             {
-                AnalysisResult analysisResult = await AnalyzeImageWithFallbackAsync(fullImagePath, modelEndpoints, summary, progress, cancellationToken);
+                AnalysisResult analysisResult = await AnalyzeImageWithFallbackAsync(fullImagePath, modelEndpoints, options, summary, runLogPath, progress, cancellationToken);
                 string rawResponse = analysisResult.RawResponse;
                 PhotoAnalysis? analysis = TryParsePhotoAnalysis(rawResponse);
                 analysis = EnrichAnalysisTags(analysis);
@@ -237,18 +247,20 @@ public sealed class PhotoAiScanner
                     Model = analysisResult.Endpoint.Model,
                     ProcessedAtUtc = DateTimeOffset.UtcNow,
                     Analysis = analysis,
-                    RawResponse = rawResponse
+                    RawResponse = rawResponse,
+                    ImageProcessing = analysisResult.ImageProcessing,
+                    OllamaStats = analysisResult.OllamaStats,
+                    ModelAttempts = analysisResult.ModelAttempts.ToArray()
                 };
+
+                var writtenSidecarDisplayNames = new List<string>();
 
                 if (writePlan.CanWriteJson)
                 {
-                    string json = JsonSerializer.Serialize(
-                        sidecar,
-                        new JsonSerializerOptions { WriteIndented = true }
-                    );
+                    string json = PhotoAiSidecarSerializer.Serialize(sidecar);
 
                     await File.WriteAllTextAsync(photoAiSidecarPath, json, cancellationToken);
-                    Report(progress, "WROTE", $"WROTE {photoAiSidecarPath}", fullImagePath);
+                    writtenSidecarDisplayNames.Add(photoAiSidecarPath);
                 }
                 else if (options.WriteJson)
                 {
@@ -280,7 +292,7 @@ public sealed class PhotoAiScanner
                             string xmp = BuildImmichXmp(analysis, options.AddTags);
                             await File.WriteAllTextAsync(xmpPath, xmp, cancellationToken);
                             summary.XmpWritten++;
-                            Report(progress, "WROTE", $"WROTE {xmpPath}", fullImagePath);
+                            writtenSidecarDisplayNames.Add(Path.GetFileName(xmpPath));
                         }
                         else
                         {
@@ -290,13 +302,18 @@ public sealed class PhotoAiScanner
                     }
                 }
 
+                if (writtenSidecarDisplayNames.Count > 0)
+                {
+                    Report(progress, "WROTE", $"Wrote {string.Join(", ", writtenSidecarDisplayNames)}", fullImagePath);
+                }
+
                 summary.Completed++;
                 Report(
                     progress,
                     "PROGRESS",
-                    $"Completed {displayIndex}/{imagePaths.Count}: {Path.GetFileName(fullImagePath)}",
+                    $"Completed {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: {Path.GetFileName(fullImagePath)}",
                     fullImagePath,
-                    BuildProgressSnapshot(summary, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
+                    BuildProgressSnapshot(summary, options, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
             }
             catch (OperationCanceledException)
             {
@@ -304,8 +321,9 @@ public sealed class PhotoAiScanner
                     progress,
                     "CANCELLED",
                     "Scan cancelled by user.",
-                    snapshot: BuildProgressSnapshot(summary, PhotoAiRunState.Cancelled, "Cancelled", imagePaths.Count));
+                    snapshot: BuildProgressSnapshot(summary, options, PhotoAiRunState.Cancelled, "Cancelled", imagePaths.Count));
                 await AppendRunLogAsync(runLogPath, "CANCELLED", new[] { $"image={fullImagePath}" }, CancellationToken.None);
+                await UnloadModelEndpointsAsync(modelEndpoints, progress, CancellationToken.None);
                 throw;
             }
             catch (Exception ex)
@@ -314,9 +332,9 @@ public sealed class PhotoAiScanner
                 Report(
                     progress,
                     "FAILED",
-                    $"FAILED {fullImagePath}: {ex.Message}",
+                    $"FAILED {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: {fullImagePath}: {ex.Message}",
                     fullImagePath,
-                    BuildProgressSnapshot(summary, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
+                    BuildProgressSnapshot(summary, options, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
                 await AppendRunLogAsync(runLogPath, "FAILED", new[]
                 {
                     $"image={fullImagePath}",
@@ -331,7 +349,7 @@ public sealed class PhotoAiScanner
             progress,
             "RUN COMPLETE",
             "Scan complete.",
-            snapshot: BuildProgressSnapshot(summary, PhotoAiRunState.Completed, "Run complete", imagePaths.Count));
+            snapshot: BuildProgressSnapshot(summary, options, PhotoAiRunState.Completed, "Run complete", imagePaths.Count));
         foreach (string summaryLine in BuildRunSummaryLines(summary))
         {
             Report(progress, "SUMMARY", summaryLine);
@@ -340,10 +358,10 @@ public sealed class PhotoAiScanner
         await AppendRunLogAsync(runLogPath, "RUN COMPLETE", new[]
         {
             $"images_found={summary.ImagesFound}",
-            $"start_time={summary.StartTime:O}",
-            $"stop_time={summary.StopTime.Value:O}",
+            $"start_time={FormatTimestamp(summary.StartTime)}",
+            $"stop_time={FormatTimestamp(summary.StopTime)}",
             $"elapsed={FormatDuration(summary.ElapsedTime)}",
-            $"average_time_per_processed_photo={FormatDuration(summary.AverageTimePerProcessedPhoto)}",
+            $"average_time_per_processed_photo={FormatAverageSecondsPerPhoto(summary.AverageTimePerProcessedPhoto)}",
             $"completed={summary.Completed}",
             $"skipped={summary.Skipped}",
             $"failed={summary.Failed}",
@@ -352,9 +370,17 @@ public sealed class PhotoAiScanner
             $"json_write_skipped={summary.JsonWriteSkipped}",
             $"xmp_write_skipped={summary.XmpWriteSkipped}",
             $"model_failures={summary.ModelFailures}",
+            $"primary_retry_attempts={summary.PrimaryRetryAttempts}",
+            $"primary_retry_successes={summary.PrimaryRetrySucceeded}",
+            $"primary_retry_failures={summary.PrimaryRetryFailed}",
             $"fallback_attempts={summary.FallbackAttempts}",
             $"fallback_successes={summary.FallbackSucceeded}"
         }, cancellationToken);
+
+        if (options.UnloadModelsAtEnd)
+        {
+            await UnloadModelEndpointsAsync(modelEndpoints, progress, CancellationToken.None);
+        }
 
         return summary;
     }
@@ -413,9 +439,9 @@ public sealed class PhotoAiScanner
                 Report(
                     progress,
                     "WOULD SKIP",
-                    $"WOULD SKIP {displayIndex}/{imagePaths.Count}: existing PhotoAI sidecar and Force is off: {fullImagePath}",
+                    $"WOULD SKIP {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: existing PhotoAI sidecar and Force is off: {fullImagePath}",
                     fullImagePath,
-                    BuildProgressSnapshot(summary, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
+                    BuildProgressSnapshot(summary, options, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
                 continue;
             }
 
@@ -435,9 +461,9 @@ public sealed class PhotoAiScanner
                 Report(
                     progress,
                     "WOULD SKIP",
-                    $"WOULD SKIP {displayIndex}/{imagePaths.Count}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call would be made: {fullImagePath}",
+                    $"WOULD SKIP {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: JSON/XMP sidecars already exist and sidecar overwrite is off, so no LLM call would be made: {fullImagePath}",
                     fullImagePath,
-                    BuildProgressSnapshot(summary, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
+                    BuildProgressSnapshot(summary, options, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
                 continue;
             }
 
@@ -466,9 +492,9 @@ public sealed class PhotoAiScanner
             Report(
                 progress,
                 "WOULD PROCESS",
-                $"WOULD PROCESS {displayIndex}/{imagePaths.Count}: {fullImagePath}",
+                $"WOULD PROCESS {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: {fullImagePath}",
                 fullImagePath,
-                BuildProgressSnapshot(summary, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
+                BuildProgressSnapshot(summary, options, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
 
             if (wouldWriteJson)
             {
@@ -497,22 +523,27 @@ public sealed class PhotoAiScanner
 
         if (options.ModelPreference == PhotoAiModelPreference.UnraidMiniCpmOnly)
         {
-            return [new PhotoAiModelEndpoint(unraidUrl, unraidModel, IsFallback: false)];
+            return [new PhotoAiModelEndpoint(unraidUrl, unraidModel, IsFallback: false, options.FallbackMaxImageDimensionPixels)];
         }
 
         string primaryUrl = CleanRequiredValue(options.OllamaBaseUrl, PhotoAiDefaults.QwenPcOllamaBaseUrl);
         string primaryModel = CleanRequiredValue(options.Model, PhotoAiDefaults.QwenPcModel);
 
+        if (options.ModelPreference == PhotoAiModelPreference.PrimaryOnly)
+        {
+            return [new PhotoAiModelEndpoint(primaryUrl, primaryModel, IsFallback: false, options.MaxImageDimensionPixels)];
+        }
+
         if (string.Equals(primaryUrl, unraidUrl, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(primaryModel, unraidModel, StringComparison.OrdinalIgnoreCase))
         {
-            return [new PhotoAiModelEndpoint(primaryUrl, primaryModel, IsFallback: false)];
+            return [new PhotoAiModelEndpoint(primaryUrl, primaryModel, IsFallback: false, options.MaxImageDimensionPixels)];
         }
 
         return
         [
-            new PhotoAiModelEndpoint(primaryUrl, primaryModel, IsFallback: false),
-            new PhotoAiModelEndpoint(unraidUrl, unraidModel, IsFallback: true)
+            new PhotoAiModelEndpoint(primaryUrl, primaryModel, IsFallback: false, options.MaxImageDimensionPixels),
+            new PhotoAiModelEndpoint(unraidUrl, unraidModel, IsFallback: true, options.FallbackMaxImageDimensionPixels)
         ];
     }
 
@@ -532,54 +563,331 @@ public sealed class PhotoAiScanner
         return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
     }
 
-    private sealed record AnalysisResult(string RawResponse, PhotoAiModelEndpoint Endpoint);
+    private sealed record AnalysisResult(
+        string RawResponse,
+        PhotoAiModelEndpoint Endpoint,
+        PhotoAiImageProcessingMetadata? ImageProcessing,
+        PhotoAiOllamaStats? OllamaStats,
+        IReadOnlyList<PhotoAiModelAttemptLog> ModelAttempts);
+
+    private sealed record OllamaImageAnalysisResult(
+        string RawResponse,
+        PhotoAiImageProcessingMetadata ImageProcessing,
+        PhotoAiOllamaStats OllamaStats);
+
+    private sealed record ImagePayload(byte[] Bytes, ImageResizeResult Resize, long OriginalByteCount)
+    {
+        public long ByteCount => Bytes.LongLength;
+    }
+
+    public sealed record ImageResizeResult(
+        int OriginalWidth,
+        int OriginalHeight,
+        int Width,
+        int Height,
+        bool WasResized,
+        TimeSpan Elapsed);
+
+    public static ImageResizeResult CalculateResizeDimensions(int originalWidth, int originalHeight, int maxImageDimensionPixels)
+    {
+        if (originalWidth <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(originalWidth), "Original width must be positive.");
+        }
+
+        if (originalHeight <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(originalHeight), "Original height must be positive.");
+        }
+
+        if (maxImageDimensionPixels <= 0)
+        {
+            return new ImageResizeResult(originalWidth, originalHeight, originalWidth, originalHeight, false, TimeSpan.Zero);
+        }
+
+        int longestEdge = Math.Max(originalWidth, originalHeight);
+        if (longestEdge <= maxImageDimensionPixels)
+        {
+            return new ImageResizeResult(originalWidth, originalHeight, originalWidth, originalHeight, false, TimeSpan.Zero);
+        }
+
+        double scale = (double)maxImageDimensionPixels / longestEdge;
+        int resizedWidth = Math.Max(1, (int)Math.Round(originalWidth * scale, MidpointRounding.AwayFromZero));
+        int resizedHeight = Math.Max(1, (int)Math.Round(originalHeight * scale, MidpointRounding.AwayFromZero));
+
+        return new ImageResizeResult(originalWidth, originalHeight, resizedWidth, resizedHeight, true, TimeSpan.Zero);
+    }
+
+    private static async Task<ImagePayload> PrepareImageForOllamaAsync(string imagePath, int maxImageDimensionPixels, CancellationToken cancellationToken)
+    {
+        long originalByteCount = new FileInfo(imagePath).Length;
+        var stopwatch = Stopwatch.StartNew();
+
+        using Image image = await Image.LoadAsync(imagePath, cancellationToken);
+        ImageResizeResult plannedResize = CalculateResizeDimensions(image.Width, image.Height, maxImageDimensionPixels);
+
+        if (!plannedResize.WasResized)
+        {
+            byte[] originalBytes = await File.ReadAllBytesAsync(imagePath, cancellationToken);
+            stopwatch.Stop();
+            return new ImagePayload(
+                originalBytes,
+                plannedResize with { Elapsed = stopwatch.Elapsed },
+                originalByteCount);
+        }
+
+        image.Mutate(operation => operation.Resize(plannedResize.Width, plannedResize.Height));
+        await using var resizedStream = new MemoryStream();
+        await image.SaveAsJpegAsync(resizedStream, new JpegEncoder { Quality = 90 }, cancellationToken);
+        stopwatch.Stop();
+
+        return new ImagePayload(
+            resizedStream.ToArray(),
+            plannedResize with { Elapsed = stopwatch.Elapsed },
+            originalByteCount);
+    }
+
+    private static async Task SetModelKeepAliveAsync(
+        PhotoAiModelEndpoint endpoint,
+        string keepAlive,
+        string eventName,
+        IProgress<PhotoAiScanProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        Report(progress, eventName, $"Setting {endpoint.Model} keep_alive={keepAlive} at {endpoint.OllamaBaseUrl}.");
+
+        using HttpClient http = new()
+        {
+            BaseAddress = new Uri(endpoint.OllamaBaseUrl),
+            Timeout = TimeSpan.FromMinutes(5)
+        };
+
+        var request = new OllamaGenerateRequest
+        {
+            Model = endpoint.Model,
+            Prompt = "",
+            Images = [],
+            Stream = false,
+            KeepAlive = keepAlive
+        };
+
+        HttpResponseMessage response = await http.PostAsJsonAsync("/api/generate", request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            string errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException($"Ollama keep_alive request failed for {endpoint.Model} at {endpoint.OllamaBaseUrl}: HTTP {(int)response.StatusCode} {response.ReasonPhrase}: {errorBody}");
+        }
+    }
+
+    private static async Task UnloadModelEndpointsAsync(
+        IReadOnlyList<PhotoAiModelEndpoint> endpoints,
+        IProgress<PhotoAiScanProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        foreach (PhotoAiModelEndpoint endpoint in endpoints.DistinctBy(endpoint => (endpoint.OllamaBaseUrl, endpoint.Model)))
+        {
+            try
+            {
+                await SetModelKeepAliveAsync(endpoint, PhotoAiDefaults.OllamaUnloadKeepAlive, "MODEL UNLOAD", progress, cancellationToken);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                Report(progress, "MODEL UNLOAD FAILED", $"Could not unload {endpoint.Model} at {endpoint.OllamaBaseUrl}: {ex.Message}");
+            }
+        }
+    }
 
     private async Task<AnalysisResult> AnalyzeImageWithFallbackAsync(
         string imagePath,
         IReadOnlyList<PhotoAiModelEndpoint> endpoints,
+        PhotoAiScanOptions options,
         PhotoAiScanSummary summary,
+        string runLogPath,
         IProgress<PhotoAiScanProgress>? progress,
         CancellationToken cancellationToken)
     {
         Exception? primaryException = null;
+        var attemptLogs = new List<PhotoAiModelAttemptLog>();
+        int attemptNumber = 0;
 
-        for (int i = 0; i < endpoints.Count; i++)
+        for (int endpointIndex = 0; endpointIndex < endpoints.Count; endpointIndex++)
         {
-            PhotoAiModelEndpoint endpoint = endpoints[i];
-            try
+            PhotoAiModelEndpoint endpoint = endpoints[endpointIndex];
+            int maxEndpointAttempts = endpoint.IsFallback ? 1 : 2;
+
+            if (endpoint.IsFallback)
             {
-                if (endpoint.IsFallback)
-                {
-                    summary.FallbackAttempts++;
-                    Report(progress, "FALLBACK", $"Primary model failed; trying fallback {endpoint.Model} at {endpoint.OllamaBaseUrl}. This is recoverable; scan will continue if fallback succeeds.", imagePath);
-                }
-
-                TimeSpan timeout = endpoint.IsFallback ? TimeSpan.FromMinutes(5) : TimeSpan.FromMinutes(1);
-                string rawResponse = await AnalyzeImageAsync(imagePath, endpoint.OllamaBaseUrl, endpoint.Model, progress, cancellationToken, timeout);
-                if (endpoint.IsFallback)
-                {
-                    summary.FallbackSucceeded++;
-                }
-
-                return new AnalysisResult(rawResponse, endpoint);
+                summary.FallbackAttempts++;
+                Report(progress, "FALLBACK", $"Primary model failed after two attempts; trying fallback {endpoint.Model} at {endpoint.OllamaBaseUrl}. This is recoverable; scan will continue if fallback succeeds.", imagePath);
             }
-            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+
+            for (int endpointAttempt = 1; endpointAttempt <= maxEndpointAttempts; endpointAttempt++)
             {
-                summary.ModelFailures++;
-                primaryException ??= ex;
+                attemptNumber++;
+                TimeSpan timeout = TimeSpan.FromMinutes(PhotoAiDefaults.OllamaAnalysisTimeoutMinutes);
+                DateTimeOffset startedAtUtc = DateTimeOffset.UtcNow;
 
-                if (i == endpoints.Count - 1)
+                try
                 {
-                    throw primaryException == ex
-                        ? ex
-                        : new InvalidOperationException($"Primary and fallback model calls failed. Primary: {primaryException.Message}; Fallback: {ex.Message}", ex);
-                }
+                    if (!endpoint.IsFallback && endpointAttempt == 2)
+                    {
+                        summary.PrimaryRetryAttempts++;
+                        Report(progress, "PRIMARY RETRY", $"Retrying primary model {endpoint.Model} at {endpoint.OllamaBaseUrl} after a transient-looking Ollama failure.", imagePath);
+                    }
 
-                Report(progress, "MODEL FAILED", $"Model call failed for {endpoint.Model} at {endpoint.OllamaBaseUrl}: {ex.Message}", imagePath);
+                    OllamaImageAnalysisResult attemptResult = await AnalyzeImageWithDiagnosticsAsync(
+                        imagePath,
+                        endpoint.OllamaBaseUrl,
+                        endpoint.Model,
+                        progress,
+                        cancellationToken,
+                        timeout,
+                        endpoint.MaxImageDimensionPixels,
+                        runLogPath,
+                        attemptNumber,
+                        endpoint.IsFallback,
+                        startedAtUtc);
+                    attemptLogs.Add(new PhotoAiModelAttemptLog
+                    {
+                        AttemptNumber = attemptNumber,
+                        OllamaBaseUrl = endpoint.OllamaBaseUrl,
+                        Model = endpoint.Model,
+                        IsFallback = endpoint.IsFallback,
+                        StartedAtUtc = startedAtUtc,
+                        CompletedAtUtc = DateTimeOffset.UtcNow,
+                        Succeeded = true,
+                        TimeoutSeconds = timeout.TotalSeconds,
+                        ImageProcessing = attemptResult.ImageProcessing,
+                        OllamaStats = attemptResult.OllamaStats
+                    });
+                    if (endpoint.IsFallback)
+                    {
+                        summary.FallbackSucceeded++;
+                    }
+                    else if (endpointAttempt == 2)
+                    {
+                        summary.PrimaryRetrySucceeded++;
+                    }
+
+                    return new AnalysisResult(
+                        attemptResult.RawResponse,
+                        endpoint,
+                        attemptResult.ImageProcessing,
+                        attemptResult.OllamaStats,
+                        attemptLogs);
+                }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    summary.ModelFailures++;
+                    if (!endpoint.IsFallback && endpointAttempt == 2)
+                    {
+                        summary.PrimaryRetryFailed++;
+                    }
+
+                    if (!endpoint.IsFallback)
+                    {
+                        primaryException ??= ex;
+                    }
+
+                    var failedAttempt = new PhotoAiModelAttemptLog
+                    {
+                        AttemptNumber = attemptNumber,
+                        OllamaBaseUrl = endpoint.OllamaBaseUrl,
+                        Model = endpoint.Model,
+                        IsFallback = endpoint.IsFallback,
+                        StartedAtUtc = startedAtUtc,
+                        CompletedAtUtc = DateTimeOffset.UtcNow,
+                        Succeeded = false,
+                        TimeoutSeconds = timeout.TotalSeconds,
+                        ErrorType = ex.GetType().FullName,
+                        ErrorMessage = ex.Message
+                    };
+                    attemptLogs.Add(failedAttempt);
+                    await AppendRunLogAsync(runLogPath, "MODEL ATTEMPT FAILED", new[]
+                    {
+                        $"image={imagePath}",
+                        $"attempt_number={attemptNumber}",
+                        $"endpoint_attempt={endpointAttempt}",
+                        $"ollama={endpoint.OllamaBaseUrl}",
+                        $"model={endpoint.Model}",
+                        $"is_fallback={endpoint.IsFallback}",
+                        $"timeout_seconds={timeout.TotalSeconds}",
+                        $"max_image_dimension_pixels={endpoint.MaxImageDimensionPixels}",
+                        $"exception_type={ex.GetType().FullName}",
+                        $"message={ex.Message}",
+                        $"full_exception={OneLineExcerpt(ex.ToString(), 4000)}"
+                    }, cancellationToken);
+
+                    bool shouldRetryPrimary =
+                        !endpoint.IsFallback &&
+                        endpointAttempt < maxEndpointAttempts &&
+                        IsTransientOllamaFailure(ex);
+
+                    if (shouldRetryPrimary)
+                    {
+                        await AppendRunLogAsync(runLogPath, "PRIMARY RETRY SCHEDULED", new[]
+                        {
+                            $"image={imagePath}",
+                            $"failed_attempt_number={attemptNumber}",
+                            $"next_attempt_number={attemptNumber + 1}",
+                            $"retry_delay_ms={PhotoAiDefaults.PrimaryTransientRetryDelayMilliseconds}",
+                            $"ollama={endpoint.OllamaBaseUrl}",
+                            $"model={endpoint.Model}",
+                            $"reason={OneLineExcerpt(ex.Message, 1000)}"
+                        }, cancellationToken);
+                        Report(progress, "PRIMARY RETRY", $"Primary model failed with a transient-looking Ollama error; retrying once before fallback: {ex.Message}", imagePath);
+                        await Task.Delay(PhotoAiDefaults.PrimaryTransientRetryDelayMilliseconds, cancellationToken);
+                        continue;
+                    }
+
+                    if (!endpoint.IsFallback && endpointAttempt < maxEndpointAttempts)
+                    {
+                        await AppendRunLogAsync(runLogPath, "PRIMARY RETRY SKIPPED", new[]
+                        {
+                            $"image={imagePath}",
+                            $"failed_attempt_number={attemptNumber}",
+                            $"ollama={endpoint.OllamaBaseUrl}",
+                            $"model={endpoint.Model}",
+                            $"reason=non_transient_error",
+                            $"message={OneLineExcerpt(ex.Message, 1000)}"
+                        }, cancellationToken);
+                    }
+
+                    bool isLastEndpoint = endpointIndex == endpoints.Count - 1;
+                    bool isLastEndpointAttempt = endpointAttempt == maxEndpointAttempts || (!endpoint.IsFallback && !shouldRetryPrimary);
+                    if (isLastEndpoint && isLastEndpointAttempt)
+                    {
+                        if (primaryException is null || primaryException == ex)
+                        {
+                            throw;
+                        }
+
+                        throw new InvalidOperationException($"Primary and fallback model calls failed. Primary: {primaryException.Message}; Fallback: {ex.Message}", ex);
+                    }
+
+                    Report(progress, "MODEL FAILED", $"Model call failed for {endpoint.Model} at {endpoint.OllamaBaseUrl}: {ex.Message}", imagePath);
+                    break;
+                }
             }
         }
 
         throw new InvalidOperationException("No model endpoints were configured.");
+    }
+
+    private static bool IsTransientOllamaFailure(Exception ex)
+    {
+        string message = ex.ToString();
+        return message.Contains("HTTP 500", StringComparison.OrdinalIgnoreCase) &&
+               (message.Contains("unexpected EOF", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("Failed to create new sequence", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("failed to process inputs", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string FormatOllamaKeepAliveForLog(string? keepAlive)
+    {
+        return string.IsNullOrWhiteSpace(keepAlive)
+            ? "omitted (Ollama default)"
+            : keepAlive;
     }
 
     private static async Task WaitIfPausedAsync(PhotoAiScanOptions options, IProgress<PhotoAiScanProgress>? progress, CancellationToken cancellationToken)
@@ -670,17 +978,93 @@ public sealed class PhotoAiScanner
         string model,
         IProgress<PhotoAiScanProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        int maxImageDimensionPixels = PhotoAiDefaults.QwenMaxImageDimensionPixels)
+    {
+        OllamaImageAnalysisResult result = await AnalyzeImageWithDiagnosticsAsync(
+            imagePath,
+            ollamaBaseUrl,
+            model,
+            progress,
+            cancellationToken,
+            timeout,
+            maxImageDimensionPixels,
+            logPath: null,
+            attemptNumber: 1,
+            isFallback: false,
+            startedAtUtc: DateTimeOffset.UtcNow);
+        return result.RawResponse;
+    }
+
+    private async Task<OllamaImageAnalysisResult> AnalyzeImageWithDiagnosticsAsync(
+        string imagePath,
+        string ollamaBaseUrl,
+        string model,
+        IProgress<PhotoAiScanProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        TimeSpan? timeout = null,
+        int maxImageDimensionPixels = PhotoAiDefaults.QwenMaxImageDimensionPixels,
+        string? logPath = null,
+        int attemptNumber = 1,
+        bool isFallback = false,
+        DateTimeOffset? startedAtUtc = null)
     {
         if (!File.Exists(imagePath))
         {
             throw new FileNotFoundException($"Image file not found: {imagePath}", imagePath);
         }
 
-        Report(progress, "OLLAMA", $"Sent image to {model} on {FormatServerAddress(ollamaBaseUrl)}: {Path.GetFileName(imagePath)}", imagePath);
+        DateTimeOffset requestStartedAtUtc = startedAtUtc ?? DateTimeOffset.UtcNow;
+        if (!string.IsNullOrWhiteSpace(logPath))
+        {
+            await AppendRunLogAsync(logPath, "MODEL ATTEMPT START", new[]
+            {
+                $"image={imagePath}",
+                $"attempt_number={attemptNumber}",
+                $"ollama={ollamaBaseUrl}",
+                $"model={model}",
+                $"is_fallback={isFallback}",
+                $"timeout_seconds={(timeout ?? TimeSpan.FromMinutes(PhotoAiDefaults.OllamaAnalysisTimeoutMinutes)).TotalSeconds}",
+                $"max_image_dimension_pixels={maxImageDimensionPixels}",
+                $"keep_alive={FormatOllamaKeepAliveForLog(PhotoAiDefaults.OllamaKeepAlive)}",
+                "num_ctx=default_from_ollama_or_modelfile",
+                $"started_at_utc={requestStartedAtUtc:O}"
+            }, cancellationToken);
+        }
 
-        byte[] imageBytes = await File.ReadAllBytesAsync(imagePath, cancellationToken);
-        string imageBase64 = Convert.ToBase64String(imageBytes);
+        ImagePayload imagePayload = await PrepareImageForOllamaAsync(imagePath, maxImageDimensionPixels, cancellationToken);
+
+        string imageBase64 = Convert.ToBase64String(imagePayload.Bytes);
+        var imageProcessing = new PhotoAiImageProcessingMetadata
+        {
+            OriginalWidth = imagePayload.Resize.OriginalWidth,
+            OriginalHeight = imagePayload.Resize.OriginalHeight,
+            SentWidth = imagePayload.Resize.Width,
+            SentHeight = imagePayload.Resize.Height,
+            WasResized = imagePayload.Resize.WasResized,
+            MaxImageDimensionPixels = maxImageDimensionPixels,
+            OriginalBytes = imagePayload.OriginalByteCount,
+            SentBytes = imagePayload.ByteCount,
+            Base64Chars = imageBase64.Length,
+            ResizeElapsedMilliseconds = imagePayload.Resize.Elapsed.TotalMilliseconds
+        };
+
+        if (!string.IsNullOrWhiteSpace(logPath))
+        {
+            await AppendRunLogAsync(logPath, "IMAGE PAYLOAD", new[]
+            {
+                $"image={imagePath}",
+                $"attempt_number={attemptNumber}",
+                $"model={model}",
+                $"original_dimensions={imageProcessing.OriginalWidth}x{imageProcessing.OriginalHeight}",
+                $"sent_dimensions={imageProcessing.SentWidth}x{imageProcessing.SentHeight}",
+                $"was_resized={imageProcessing.WasResized}",
+                $"original_bytes={imageProcessing.OriginalBytes}",
+                $"sent_bytes={imageProcessing.SentBytes}",
+                $"base64_chars={imageProcessing.Base64Chars}",
+                $"resize_elapsed_ms={imageProcessing.ResizeElapsedMilliseconds:F1}"
+            }, cancellationToken);
+        }
 
         string prompt = """
 You are helping catalog a personal photo library.
@@ -732,28 +1116,75 @@ Other rules:
             Prompt = prompt,
             Images = [imageBase64],
             Stream = false,
-            Format = "json"
+            Format = "json",
+            KeepAlive = PhotoAiDefaults.OllamaKeepAlive
         };
+        if (!string.IsNullOrWhiteSpace(logPath))
+        {
+            await AppendRunLogAsync(logPath, "OLLAMA REQUEST", new[]
+            {
+                $"image={imagePath}",
+                $"attempt_number={attemptNumber}",
+                $"ollama={ollamaBaseUrl}",
+                $"model={model}",
+                $"prompt_chars={prompt.Length}",
+                $"image_base64_chars={imageBase64.Length}",
+                $"format=json",
+                $"keep_alive={FormatOllamaKeepAliveForLog(PhotoAiDefaults.OllamaKeepAlive)}",
+                "options=none"
+            }, cancellationToken);
+        }
 
         using HttpClient http = new()
         {
             BaseAddress = new Uri(ollamaBaseUrl),
-            Timeout = timeout ?? TimeSpan.FromMinutes(5)
+            Timeout = timeout ?? TimeSpan.FromMinutes(PhotoAiDefaults.OllamaAnalysisTimeoutMinutes)
         };
 
         HttpResponseMessage response;
+        var httpStopwatch = Stopwatch.StartNew();
         try
         {
             response = await http.PostAsJsonAsync("/api/generate", request, cancellationToken);
+            httpStopwatch.Stop();
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
+            httpStopwatch.Stop();
+            if (!string.IsNullOrWhiteSpace(logPath))
+            {
+                await AppendRunLogAsync(logPath, "OLLAMA CALL EXCEPTION", new[]
+                {
+                    $"image={imagePath}",
+                    $"attempt_number={attemptNumber}",
+                    $"ollama={ollamaBaseUrl}",
+                    $"model={model}",
+                    $"http_elapsed_ms={httpStopwatch.Elapsed.TotalMilliseconds:F1}",
+                    $"exception_type={ex.GetType().FullName}",
+                    $"message={ex.Message}",
+                    $"full_exception={OneLineExcerpt(ex.ToString(), 4000)}"
+                }, cancellationToken);
+            }
             throw new InvalidOperationException($"Failed to call Ollama at {ollamaBaseUrl}. Is Ollama running?", ex);
         }
 
         if (!response.IsSuccessStatusCode)
         {
             string errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(logPath))
+            {
+                await AppendRunLogAsync(logPath, "OLLAMA HTTP FAILED", new[]
+                {
+                    $"image={imagePath}",
+                    $"attempt_number={attemptNumber}",
+                    $"ollama={ollamaBaseUrl}",
+                    $"model={model}",
+                    $"status_code={(int)response.StatusCode}",
+                    $"reason={response.ReasonPhrase}",
+                    $"http_elapsed_ms={httpStopwatch.Elapsed.TotalMilliseconds:F1}",
+                    $"error_body={OneLineExcerpt(errorBody, 4000)}"
+                }, cancellationToken);
+            }
             throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} {response.ReasonPhrase}: {errorBody}");
         }
 
@@ -765,15 +1196,80 @@ Other rules:
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             string rawBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(logPath))
+            {
+                await AppendRunLogAsync(logPath, "OLLAMA RESPONSE PARSE FAILED", new[]
+                {
+                    $"image={imagePath}",
+                    $"attempt_number={attemptNumber}",
+                    $"ollama={ollamaBaseUrl}",
+                    $"model={model}",
+                    $"http_elapsed_ms={httpStopwatch.Elapsed.TotalMilliseconds:F1}",
+                    $"raw_body_length={rawBody.Length}",
+                    $"raw_body_excerpt={OneLineExcerpt(rawBody, 4000)}",
+                    $"exception_type={ex.GetType().FullName}",
+                    $"message={ex.Message}"
+                }, cancellationToken);
+            }
             throw new InvalidOperationException($"Failed to parse Ollama response. Raw response: {rawBody}", ex);
         }
 
         if (ollamaResponse is null)
         {
+            if (!string.IsNullOrWhiteSpace(logPath))
+            {
+                await AppendRunLogAsync(logPath, "OLLAMA EMPTY RESPONSE", new[]
+                {
+                    $"image={imagePath}",
+                    $"attempt_number={attemptNumber}",
+                    $"ollama={ollamaBaseUrl}",
+                    $"model={model}",
+                    $"http_elapsed_ms={httpStopwatch.Elapsed.TotalMilliseconds:F1}"
+                }, cancellationToken);
+            }
             throw new InvalidOperationException("Ollama returned an empty response.");
         }
 
-        return ollamaResponse.Response;
+        var ollamaStats = new PhotoAiOllamaStats
+        {
+            ModelReturned = ollamaResponse.Model,
+            CreatedAt = ollamaResponse.CreatedAt,
+            Done = ollamaResponse.Done,
+            DoneReason = ollamaResponse.DoneReason,
+            HttpElapsedMilliseconds = httpStopwatch.Elapsed.TotalMilliseconds,
+            TotalDurationNanoseconds = ollamaResponse.TotalDurationNanoseconds,
+            LoadDurationNanoseconds = ollamaResponse.LoadDurationNanoseconds,
+            PromptEvalCount = ollamaResponse.PromptEvalCount,
+            PromptEvalDurationNanoseconds = ollamaResponse.PromptEvalDurationNanoseconds,
+            EvalCount = ollamaResponse.EvalCount,
+            EvalDurationNanoseconds = ollamaResponse.EvalDurationNanoseconds,
+            ResponseChars = ollamaResponse.Response.Length
+        };
+
+        if (!string.IsNullOrWhiteSpace(logPath))
+        {
+            await AppendRunLogAsync(logPath, "OLLAMA RESPONSE", new[]
+            {
+                $"image={imagePath}",
+                $"attempt_number={attemptNumber}",
+                $"ollama={ollamaBaseUrl}",
+                $"requested_model={model}",
+                $"returned_model={ollamaStats.ModelReturned ?? "unknown"}",
+                $"done={ollamaStats.Done}",
+                $"done_reason={ollamaStats.DoneReason ?? "none"}",
+                $"http_elapsed_ms={ollamaStats.HttpElapsedMilliseconds:F1}",
+                $"total_duration_ns={ollamaStats.TotalDurationNanoseconds?.ToString() ?? "null"}",
+                $"load_duration_ns={ollamaStats.LoadDurationNanoseconds?.ToString() ?? "null"}",
+                $"prompt_eval_count={ollamaStats.PromptEvalCount?.ToString() ?? "null"}",
+                $"prompt_eval_duration_ns={ollamaStats.PromptEvalDurationNanoseconds?.ToString() ?? "null"}",
+                $"eval_count={ollamaStats.EvalCount?.ToString() ?? "null"}",
+                $"eval_duration_ns={ollamaStats.EvalDurationNanoseconds?.ToString() ?? "null"}",
+                $"response_chars={ollamaStats.ResponseChars}",
+                $"response_excerpt={OneLineExcerpt(ollamaResponse.Response, 1200)}"
+            }, cancellationToken);
+        }
+
+        return new OllamaImageAnalysisResult(ollamaResponse.Response, imageProcessing, ollamaStats);
     }
 
     public static PhotoAnalysis? TryParsePhotoAnalysis(string rawResponse)
@@ -1296,6 +1792,32 @@ Other rules:
 
     public static string GetImmichXmpSidecarPath(string imagePath) => imagePath + ".xmp";
 
+    public static bool IsInExcludedScanDirectory(string candidatePath, string rootPath)
+    {
+        string fullCandidate = NormalizeDirectoryOrFilePath(candidatePath);
+        string fullRoot = NormalizeDirectoryPath(rootPath);
+
+        if (!IsPathUnderRoot(fullCandidate, fullRoot))
+        {
+            return false;
+        }
+
+        string relativePath = Path.GetRelativePath(fullRoot, fullCandidate);
+        if (string.IsNullOrWhiteSpace(relativePath) || relativePath == ".")
+        {
+            return false;
+        }
+
+        string[] parts = relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        return parts.Any(part =>
+            string.Equals(part, ".photoai", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(part, ".Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(part, "@eaDir", StringComparison.OrdinalIgnoreCase));
+    }
+
     public static bool IsPathUnderRoot(string candidatePath, string rootPath)
     {
         string fullCandidate = NormalizeDirectoryOrFilePath(candidatePath);
@@ -1321,7 +1843,7 @@ Other rules:
 
     private static async Task AppendRunLogAsync(string logPath, string eventName, IEnumerable<string> details, CancellationToken cancellationToken = default)
     {
-        string timestamp = DateTimeOffset.Now.ToString("O");
+        string timestamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
         List<string> lines =
         [
@@ -1379,7 +1901,30 @@ Other rules:
     {
         return timestamp is null
             ? "n/a"
-            : timestamp.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz");
+            : $"{timestamp.Value.ToLocalTime():yyyy-MM-dd HH:mm:ss} {FormatLocalTimeZoneAbbreviation(timestamp.Value)}";
+    }
+
+    private static string FormatMaxImageDimension(int maxImageDimensionPixels)
+    {
+        return maxImageDimensionPixels <= 0
+            ? "original/full-res"
+            : $"{maxImageDimensionPixels}px longest edge";
+    }
+
+    private static string FormatLocalTimeZoneAbbreviation(DateTimeOffset timestamp)
+    {
+        TimeZoneInfo local = TimeZoneInfo.Local;
+        string displayName = local.IsDaylightSavingTime(timestamp) ? local.DaylightName : local.StandardName;
+        if (displayName.Contains("Mountain", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MST";
+        }
+
+        string abbreviation = string.Concat(displayName
+            .Split([' ', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(part => part.Length > 0 && char.IsLetter(part[0]))
+            .Select(part => char.ToUpperInvariant(part[0])));
+        return string.IsNullOrWhiteSpace(abbreviation) ? local.Id : abbreviation;
     }
 
     private static string FormatDuration(TimeSpan duration)
@@ -1389,6 +1934,12 @@ Other rules:
             : $"{duration.Minutes:00}:{duration.Seconds:00}";
     }
 
+    private static string FormatAverageSecondsPerPhoto(TimeSpan duration)
+    {
+        double seconds = duration < TimeSpan.Zero ? 0.0 : duration.TotalSeconds;
+        return $"{seconds:F1} seconds";
+    }
+
     private static string[] BuildRunSummaryLines(PhotoAiScanSummary summary)
     {
         return
@@ -1396,13 +1947,16 @@ Other rules:
             $"Start: {FormatTimestamp(summary.StartTime)}",
             $"Stop: {FormatTimestamp(summary.StopTime)}",
             $"Elapsed: {FormatDuration(summary.ElapsedTime)}",
-            $"Average/photo: {FormatDuration(summary.AverageTimePerProcessedPhoto)}",
+            $"Average/photo: {FormatAverageSecondsPerPhoto(summary.AverageTimePerProcessedPhoto)}",
             $"Files processed: {summary.Completed}",
             $"XMP files successfully written: {summary.XmpWritten}",
             $"Skipped: {summary.Skipped}",
             $"Failed: {summary.Failed}",
             $"Parse/XMP skipped: {summary.ParseFailed}",
             $"Model failures: {summary.ModelFailures}",
+            $"Primary retry attempts: {summary.PrimaryRetryAttempts}",
+            $"Primary retry successes: {summary.PrimaryRetrySucceeded}",
+            $"Primary retry failures: {summary.PrimaryRetryFailed}",
             $"Fallback attempts: {summary.FallbackAttempts}",
             $"Fallback successes: {summary.FallbackSucceeded}"
         ];
@@ -1415,35 +1969,72 @@ Other rules:
             $"Start: {FormatTimestamp(summary.StartTime)}",
             $"Stop: {FormatTimestamp(summary.StopTime)}",
             $"Elapsed: {FormatDuration(summary.ElapsedTime)}",
-            $"Average/photo: {FormatDuration(summary.AverageTimePerProcessedPhoto)}",
+            $"Average/photo: {FormatAverageSecondsPerPhoto(summary.AverageTimePerProcessedPhoto)}",
+            $"Would skip files: {summary.Skipped}",
             $"Would process: {summary.WouldProcess}",
-            $"Would write JSON: {summary.WouldWriteJsonSidecar}",
-            $"Would write XMP: {summary.WouldWriteXmpSidecar}",
-            $"Would skip JSON: {summary.WouldSkipJsonSidecar}",
-            $"Would skip XMP: {summary.WouldSkipXmpSidecar}",
+            $"Would write JSON files: {summary.WouldWriteJsonSidecar}",
+            $"Would write XMP files: {summary.WouldWriteXmpSidecar}",
+            $"Would skip JSON writes: {summary.WouldSkipJsonSidecar}",
+            $"Would skip XMP writes: {summary.WouldSkipXmpSidecar}",
             $"Existing JSON: {summary.ExistingJsonSidecars}",
             $"Existing XMP: {summary.ExistingXmpSidecars}",
             $"Blocked/failed: {summary.Failed}"
         ];
     }
 
+    private static string FormatProgressLabel(
+        PhotoAiScanOptions options,
+        int localIndex,
+        int localTotal,
+        PhotoAiScanSummary summary,
+        bool includeCurrentFile)
+    {
+        if (options.ProgressTotalFiles is not > 0 || options.ProgressTotalFiles.Value == localTotal)
+        {
+            return $"{localIndex}/{localTotal}";
+        }
+
+        int priorFoldersFinished =
+            Math.Max(0, options.ProgressCompletedOffset) +
+            Math.Max(0, options.ProgressSkippedOffset) +
+            Math.Max(0, options.ProgressFailedOffset);
+        int currentFolderFinished =
+            (summary.DryRun ? summary.WouldProcess : summary.Completed) +
+            summary.Skipped +
+            summary.Failed;
+        int aggregatePosition = priorFoldersFinished + currentFolderFinished + (includeCurrentFile ? 1 : 0);
+        aggregatePosition = Math.Clamp(aggregatePosition, 0, options.ProgressTotalFiles.Value);
+
+        return $"batch {aggregatePosition}/{options.ProgressTotalFiles.Value}, folder {localIndex}/{localTotal}";
+    }
+
     private static PhotoAiRunProgressSnapshot BuildProgressSnapshot(
         PhotoAiScanSummary summary,
+        PhotoAiScanOptions options,
         PhotoAiRunState state,
         string phase,
         int? totalFiles)
     {
-        int completedFiles = summary.DryRun ? summary.WouldProcess : summary.Completed;
+        int progressOffset = Math.Max(0, options.ProgressCompletedOffset);
+        int completedFiles = progressOffset + (summary.DryRun ? summary.WouldProcess : summary.Completed);
+        int skippedFiles = Math.Max(0, options.ProgressSkippedOffset) + summary.Skipped;
+        int failedFiles = Math.Max(0, options.ProgressFailedOffset) + summary.Failed;
+        int primaryRetryAttempts = Math.Max(0, options.ProgressPrimaryRetryAttemptsOffset) + summary.PrimaryRetryAttempts;
+        int fallbackAttempts = Math.Max(0, options.ProgressFallbackAttemptsOffset) + summary.FallbackAttempts;
+        int? effectiveTotalFiles = options.ProgressTotalFiles ?? totalFiles;
+        DateTimeOffset startedAt = options.ProgressStartedAt ?? summary.StartTime;
 
         return PhotoAiRunProgressSnapshot.Create(
             state,
             phase,
-            summary.StartTime,
+            startedAt,
             DateTimeOffset.Now,
-            totalFiles,
+            effectiveTotalFiles,
             completedFiles,
-            summary.Skipped,
-            summary.Failed);
+            skippedFiles,
+            failedFiles,
+            primaryRetryAttempts,
+            fallbackAttempts);
     }
 
     private static void Report(

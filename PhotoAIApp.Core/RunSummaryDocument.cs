@@ -6,6 +6,8 @@ namespace PhotoAIApp.Core;
 
 public sealed record PhotoAiRunSummaryDocument
 {
+    private const double DryRunEstimatedSecondsPerFile = 5.6;
+
     public required string Title { get; init; }
     public required PhotoAiRunState State { get; init; }
     public required DateTimeOffset CreatedAt { get; init; }
@@ -39,18 +41,20 @@ public sealed record PhotoAiRunSummaryDocument
         builder.AppendLine($"Stop: {FormatTimestamp(summary.StopTime)}");
         builder.AppendLine($"Elapsed: {FormatDuration(summary.ElapsedTime)}");
         builder.AppendLine($"Images found: {summary.ImagesFound}");
-        builder.AppendLine($"Average/photo: {FormatDuration(summary.AverageTimePerProcessedPhoto)}");
+        builder.AppendLine($"Average/photo: {FormatAverageSecondsPerPhoto(summary.AverageTimePerProcessedPhoto)}");
         builder.AppendLine($"Anomaly log: {summary.RunLogPath}");
         builder.AppendLine();
 
         if (summary.DryRun)
         {
             AppendSection(builder, "Dry-run preview", [
+                $"Would skip files: {summary.Skipped}",
                 $"Would process: {summary.WouldProcess}",
-                $"Would write JSON: {summary.WouldWriteJsonSidecar}",
-                $"Would write XMP: {summary.WouldWriteXmpSidecar}",
-                $"Would skip JSON: {summary.WouldSkipJsonSidecar}",
-                $"Would skip XMP: {summary.WouldSkipXmpSidecar}",
+                $"Estimated time to process: {FormatEstimatedDryRunProcessingTime(summary.WouldProcess)}",
+                $"Would write JSON files: {summary.WouldWriteJsonSidecar}",
+                $"Would write XMP files: {summary.WouldWriteXmpSidecar}",
+                $"Would skip JSON writes: {summary.WouldSkipJsonSidecar}",
+                $"Would skip XMP writes: {summary.WouldSkipXmpSidecar}",
                 $"Existing JSON: {summary.ExistingJsonSidecars}",
                 $"Existing XMP: {summary.ExistingXmpSidecars}",
                 $"Blocked/failed: {summary.Failed}"
@@ -67,6 +71,9 @@ public sealed record PhotoAiRunSummaryDocument
                 $"JSON write skipped: {summary.JsonWriteSkipped}",
                 $"XMP write skipped: {summary.XmpWriteSkipped}",
                 $"Model failures: {summary.ModelFailures}",
+                $"Primary retry attempts: {summary.PrimaryRetryAttempts}",
+                $"Primary retry successes: {summary.PrimaryRetrySucceeded}",
+                $"Primary retry failures: {summary.PrimaryRetryFailed}",
                 $"Fallback attempts: {summary.FallbackAttempts}",
                 $"Fallback successes: {summary.FallbackSucceeded}"
             ]);
@@ -147,7 +154,23 @@ public sealed record PhotoAiRunSummaryDocument
     {
         return timestamp is null
             ? "n/a"
-            : timestamp.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz");
+            : $"{timestamp.Value.ToLocalTime():yyyy-MM-dd HH:mm:ss} {FormatLocalTimeZoneAbbreviation(timestamp.Value)}";
+    }
+
+    private static string FormatLocalTimeZoneAbbreviation(DateTimeOffset timestamp)
+    {
+        TimeZoneInfo local = TimeZoneInfo.Local;
+        string displayName = local.IsDaylightSavingTime(timestamp) ? local.DaylightName : local.StandardName;
+        if (displayName.Contains("Mountain", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MST";
+        }
+
+        string abbreviation = string.Concat(displayName
+            .Split([' ', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(part => part.Length > 0 && char.IsLetter(part[0]))
+            .Select(part => char.ToUpperInvariant(part[0])));
+        return string.IsNullOrWhiteSpace(abbreviation) ? local.Id : abbreviation;
     }
 
     private static string FormatDuration(TimeSpan duration)
@@ -160,6 +183,36 @@ public sealed record PhotoAiRunSummaryDocument
         return duration.TotalHours >= 1
             ? $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}"
             : $"{duration.Minutes:00}:{duration.Seconds:00}";
+    }
+
+    private static string FormatAverageSecondsPerPhoto(TimeSpan duration)
+    {
+        double seconds = duration < TimeSpan.Zero ? 0.0 : duration.TotalSeconds;
+        return $"{seconds:F1} seconds";
+    }
+
+    private static int EstimateDryRunProcessingMinutes(int filesToProcess)
+    {
+        if (filesToProcess <= 0)
+        {
+            return 0;
+        }
+
+        double estimatedSeconds = filesToProcess * DryRunEstimatedSecondsPerFile;
+        return (int)Math.Round(estimatedSeconds / 60.0, MidpointRounding.AwayFromZero);
+    }
+
+    private static string FormatEstimatedDryRunProcessingTime(int filesToProcess)
+    {
+        int totalMinutes = EstimateDryRunProcessingMinutes(filesToProcess);
+        int hours = totalMinutes / 60;
+        int minutes = totalMinutes % 60;
+        return $"{hours} {Pluralize(hours, "hour")} {minutes} {Pluralize(minutes, "minute")}";
+    }
+
+    private static string Pluralize(int count, string singular)
+    {
+        return count == 1 ? singular : singular + "s";
     }
 
     private sealed record PhotoAiRunSummaryJson
@@ -221,6 +274,15 @@ public sealed record PhotoAiRunSummaryDocument
         [JsonPropertyName("model_failures")]
         public required int ModelFailures { get; init; }
 
+        [JsonPropertyName("primary_retry_attempts")]
+        public required int PrimaryRetryAttempts { get; init; }
+
+        [JsonPropertyName("primary_retry_successes")]
+        public required int PrimaryRetrySuccesses { get; init; }
+
+        [JsonPropertyName("primary_retry_failures")]
+        public required int PrimaryRetryFailures { get; init; }
+
         [JsonPropertyName("fallback_attempts")]
         public required int FallbackAttempts { get; init; }
 
@@ -229,6 +291,15 @@ public sealed record PhotoAiRunSummaryDocument
 
         [JsonPropertyName("would_process")]
         public required int WouldProcess { get; init; }
+
+        [JsonPropertyName("estimated_processing_minutes")]
+        public int? EstimatedProcessingMinutes { get; init; }
+
+        [JsonPropertyName("estimated_processing_time")]
+        public string? EstimatedProcessingTime { get; init; }
+
+        [JsonPropertyName("estimated_processing_seconds_per_file")]
+        public double? EstimatedProcessingSecondsPerFile { get; init; }
 
         [JsonPropertyName("would_write_json")]
         public required int WouldWriteJson { get; init; }
@@ -275,9 +346,15 @@ public sealed record PhotoAiRunSummaryDocument
                 JsonWriteSkipped = summary.JsonWriteSkipped,
                 XmpWriteSkipped = summary.XmpWriteSkipped,
                 ModelFailures = summary.ModelFailures,
+                PrimaryRetryAttempts = summary.PrimaryRetryAttempts,
+                PrimaryRetrySuccesses = summary.PrimaryRetrySucceeded,
+                PrimaryRetryFailures = summary.PrimaryRetryFailed,
                 FallbackAttempts = summary.FallbackAttempts,
                 FallbackSuccesses = summary.FallbackSucceeded,
                 WouldProcess = summary.WouldProcess,
+                EstimatedProcessingMinutes = summary.DryRun ? EstimateDryRunProcessingMinutes(summary.WouldProcess) : null,
+                EstimatedProcessingTime = summary.DryRun ? FormatEstimatedDryRunProcessingTime(summary.WouldProcess) : null,
+                EstimatedProcessingSecondsPerFile = summary.DryRun ? DryRunEstimatedSecondsPerFile : null,
                 WouldWriteJson = summary.WouldWriteJsonSidecar,
                 WouldWriteXmp = summary.WouldWriteXmpSidecar,
                 WouldSkipJson = summary.WouldSkipJsonSidecar,
