@@ -1,0 +1,13 @@
+.git
+.gitignore
+.vs
+.vscode
+bin
+obj
+publish
+outgoing
+*.user
+*.suo
+*.log
+*.tmp
+**/.photoai

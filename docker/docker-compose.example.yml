@@ -1,0 +1,33 @@
+services:
+  immich-tagger:
+    image: ghcr.io/rzrnaz/immich-tagger:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: immich-tagger
+    ports:
+      - "8080:8080"
+    environment:
+      PUID: "99"
+      PGID: "100"
+      UMASK: "000"
+      TZ: "America/Phoenix"
+      IMMICH_TAGGER__PHOTO_ROOT: "/photos"
+      IMMICH_TAGGER__CONFIG_ROOT: "/config"
+      IMMICH_TAGGER__LOG_ROOT: "/config/logs"
+      IMMICH_TAGGER__PRIMARY_OLLAMA_URL: "http://192.168.1.8:11434"
+      IMMICH_TAGGER__PRIMARY_MODEL: "qwen2.5vl:7b"
+      IMMICH_TAGGER__MAX_IMAGE_SIZE: "0"
+      IMMICH_TAGGER__FALLBACK_ENABLED: "true"
+      IMMICH_TAGGER__FALLBACK_OLLAMA_URL: "http://192.168.1.8:11434"
+      IMMICH_TAGGER__FALLBACK_MODEL: "minicpm-v:latest"
+      IMMICH_TAGGER__FALLBACK_MAX_IMAGE_SIZE: "0"
+      IMMICH_TAGGER__DRY_RUN_DEFAULT: "true"
+      IMMICH_TAGGER__WRITE_JSON: "true"
+      IMMICH_TAGGER__WRITE_XMP: "true"
+      IMMICH_TAGGER__ADD_TAGS: "true"
+      IMMICH_TAGGER__OVERWRITE_SIDECARS: "false"
+    volumes:
+      - /mnt/user/photos:/photos
+      - /mnt/user/appdata/immich-tagger:/config
+    restart: unless-stopped
