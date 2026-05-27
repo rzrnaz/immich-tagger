@@ -41,12 +41,14 @@ public sealed class PhotoAiScanner
             throw new InvalidOperationException($"Selected folder is outside the configured library/safety root. Selected: {rootPath}; Safety root: {safetyRootPath}");
         }
 
-        string runLogPath = CreateRunLogPath(rootPath);
+        string runLogPath = options.DryRun
+            ? "(dry run - no anomaly log written)"
+            : CreateRunLogPath(rootPath);
         DateTimeOffset startTime = DateTimeOffset.Now;
         var summary = new PhotoAiScanSummary
         {
             RootPath = rootPath,
-            RunLogPath = options.DryRun ? "(dry run - no anomaly log written)" : runLogPath,
+            RunLogPath = runLogPath,
             StartTime = startTime,
             DryRun = options.DryRun
         };
@@ -119,10 +121,9 @@ public sealed class PhotoAiScanner
                 options.DryRun ? "Dry run preview" : "Generating descriptions",
                 imagePaths.Count));
 
-        if (options.Limit is > 0 && imagePaths.Count > options.Limit.Value)
+        if (options.Limit is > 0)
         {
-            imagePaths = imagePaths.Take(options.Limit.Value).ToList();
-            Report(progress, "LIMIT", $"Processing first {imagePaths.Count} images due to limit.");
+            Report(progress, "LIMIT", $"Processing up to {options.Limit.Value} non-skipped images due to limit.");
         }
 
         if (imagePaths.Count == 0)
@@ -226,6 +227,12 @@ public sealed class PhotoAiScanner
                     fullImagePath,
                     BuildProgressSnapshot(summary, options, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
                 continue;
+            }
+
+            if (options.Limit is > 0 && summary.Completed >= options.Limit.Value)
+            {
+                Report(progress, "LIMIT", $"Limit reached after processing {summary.Completed} non-skipped images.");
+                break;
             }
 
             Report(progress, "PROCESS", $"PROCESS {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: true)}: {fullImagePath}", fullImagePath);
@@ -465,6 +472,12 @@ public sealed class PhotoAiScanner
                     fullImagePath,
                     BuildProgressSnapshot(summary, options, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
                 continue;
+            }
+
+            if (options.Limit is > 0 && summary.WouldProcess >= options.Limit.Value)
+            {
+                Report(progress, "LIMIT", $"Limit reached after planning {summary.WouldProcess} non-skipped images.");
+                break;
             }
 
             summary.WouldProcess++;
