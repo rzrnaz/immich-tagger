@@ -1,16 +1,14 @@
 using ImmichTagger.Server;
 using PhotoAIApp.Core;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddEnvironmentVariables(prefix: "IMMICH_TAGGER__");
-builder.Services.Configure<ImmichTaggerSettings>(builder.Configuration);
-builder.Services.AddSingleton(provider =>
-{
-    var configuration = provider.GetRequiredService<IConfiguration>();
-    return configuration.Get<ImmichTaggerSettings>() ?? new ImmichTaggerSettings();
-});
+ImmichTaggerSettings initialSettings = builder.Configuration.Get<ImmichTaggerSettings>() ?? new ImmichTaggerSettings();
+LoadPersistedSettings(initialSettings);
+builder.Services.AddSingleton(initialSettings);
 builder.Services.AddSingleton<ScanJobService>();
 
 var app = builder.Build();
@@ -22,6 +20,7 @@ app.MapPost("/api/settings", (ImmichTaggerSettings settings, ImmichTaggerSetting
     lock (settings)
     {
         ApplySettingsUpdate(settings, request);
+        SavePersistedSettings(settings);
     }
 
     return Results.Ok(settings);
@@ -153,6 +152,68 @@ static bool IsHiddenOrInternalFolder(string directory)
         || string.Equals(name, ".Recycle.Bin", StringComparison.OrdinalIgnoreCase);
 }
 
+static string GetSettingsFilePath(ImmichTaggerSettings settings)
+{
+    string configRoot = string.IsNullOrWhiteSpace(settings.ConfigRoot) ? "/config" : settings.ConfigRoot;
+    return Path.Combine(Path.GetFullPath(configRoot), "immich-tagger-settings.json");
+}
+
+static void LoadPersistedSettings(ImmichTaggerSettings settings)
+{
+    string settingsFilePath = GetSettingsFilePath(settings);
+    if (!System.IO.File.Exists(settingsFilePath))
+    {
+        return;
+    }
+
+    string json = System.IO.File.ReadAllText(settingsFilePath);
+    ImmichTaggerSettings? savedSettings = JsonSerializer.Deserialize<ImmichTaggerSettings>(json, CreateJsonOptions());
+    if (savedSettings is null)
+    {
+        return;
+    }
+
+    CopySettings(savedSettings, settings);
+}
+
+static void SavePersistedSettings(ImmichTaggerSettings settings)
+{
+    string settingsFilePath = GetSettingsFilePath(settings);
+    Directory.CreateDirectory(Path.GetDirectoryName(settingsFilePath)!);
+    string json = JsonSerializer.Serialize(settings, CreateJsonOptions());
+    System.IO.File.WriteAllText(settingsFilePath, json);
+}
+
+static void CopySettings(ImmichTaggerSettings source, ImmichTaggerSettings target)
+{
+    target.PhotoRoot = source.PhotoRoot;
+    target.ConfigRoot = source.ConfigRoot;
+    target.LogRoot = source.LogRoot;
+    target.DefaultFolderPath = source.DefaultFolderPath;
+    target.Recursive = source.Recursive;
+    target.Force = source.Force;
+    target.WriteJson = source.WriteJson;
+    target.WriteXmp = source.WriteXmp;
+    target.AddTags = source.AddTags;
+    target.DryRunDefault = source.DryRunDefault;
+    target.OverwriteSidecars = source.OverwriteSidecars;
+    target.Limit = source.Limit;
+    target.PrimaryOllamaUrl = source.PrimaryOllamaUrl;
+    target.PrimaryModel = source.PrimaryModel;
+    target.MaxImageSize = source.MaxImageSize;
+    target.FallbackEnabled = source.FallbackEnabled;
+    target.FallbackOllamaUrl = source.FallbackOllamaUrl;
+    target.FallbackModel = source.FallbackModel;
+    target.FallbackMaxImageSize = source.FallbackMaxImageSize;
+}
+
+static JsonSerializerOptions CreateJsonOptions() => new()
+{
+    WriteIndented = true,
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true
+};
+
 static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 {
     string Encode(string? value) => HtmlEncoder.Default.Encode(value ?? string.Empty);
@@ -238,7 +299,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
     <section class="card">
       <h2>Settings</h2>
-      <p class="muted">These runtime values start from the Unraid template/environment defaults. Saving here changes the running container process; update the Unraid template/container variables for permanent defaults.</p>
+      <p class="muted">These values start from the Unraid template/environment defaults. Saving here writes /config/immich-tagger-settings.json so GUI edits survive container restarts. Update the Unraid template/container variables when you want to change the first-run defaults.</p>
       <div class="grid">
         <div>
           <label for="photoRoot">Photo root</label>

@@ -140,7 +140,8 @@ Current GUI conventions:
 The new server project should own:
 
 - HTTP binding on `0.0.0.0:8080`;
-- config binding from `/config`, appsettings, and environment variables;
+- first-run config binding from environment variables;
+- saved runtime settings under `/config/immich-tagger-settings.json`;
 - web UI/API routes;
 - one active scan job at a time;
 - cancellation;
@@ -170,6 +171,16 @@ Immich
 ```
 
 The container only needs network access to Ollama and filesystem access to mounted photo paths.
+
+## Container publishing
+
+The intended permanent container image is:
+
+```text
+ghcr.io/rzrnaz/immich-tagger:latest
+```
+
+The Unraid template points at that image. The GitHub Actions workflow at `.github/workflows/immich-tagger-container.yml` builds the Dockerfile and publishes branch/tag/default-branch images to GitHub Container Registry. A temporary smoke-test container created manually on Unraid should be removed after verification; users should not expect to see a permanent Unraid container until the template or compose file is installed.
 
 ## Unraid safety rules
 

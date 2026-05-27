@@ -486,6 +486,12 @@ Assert(serverProgramSource.Contains("openLogLink", StringComparison.Ordinal),
     "Docker server home page should render an Open Log link when a run log path is available");
 Assert(serverProgramSource.Contains("browseFolders", StringComparison.Ordinal),
     "Docker server home page should include browser JavaScript for folder selection under /photos");
+Assert(serverProgramSource.Contains("immich-tagger-settings.json", StringComparison.Ordinal),
+    "Docker server settings editor should persist saved GUI settings under /config");
+Assert(serverProgramSource.Contains("SavePersistedSettings(settings)", StringComparison.Ordinal),
+    "Docker server settings POST should write persisted settings for container restarts");
+Assert(serverProgramSource.Contains("LoadPersistedSettings(initialSettings)", StringComparison.Ordinal),
+    "Docker server startup should reload persisted settings after applying environment defaults");
 
 string scannerSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Core", "PhotoAiScanner.cs"));
 Assert(!scannerSource.Contains("Preparing image for {model}", StringComparison.Ordinal),

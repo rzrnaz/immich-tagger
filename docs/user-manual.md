@@ -152,6 +152,14 @@ Host path:      /mnt/user/appdata/immich-tagger
 Container path: /config
 ```
 
+When settings are changed from the web UI, Immich Tagger writes them to:
+
+```text
+/config/immich-tagger-settings.json
+```
+
+The Unraid template/environment variables are the first-run defaults. Saved web UI settings are then reloaded from `/config` after container restarts.
+
 ### Logs
 
 Docker/server logs should persist under:
@@ -329,6 +337,12 @@ UMASK=000
 ```
 
 Do not use Immich Tagger as a general permission-repair tool.
+
+It is normal not to see an Immich Tagger container on Unraid until you install the Unraid template or run a compose/container instance. Development smoke-test containers are temporary and should be removed after verification. The intended permanent image name is:
+
+```text
+ghcr.io/rzrnaz/immich-tagger:latest
+```
 
 ## Example: safely process one Unraid subdirectory
 
