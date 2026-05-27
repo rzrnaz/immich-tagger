@@ -467,6 +467,8 @@ Assert(advancedSettingsSource.Contains("Text = \"?\"", StringComparison.Ordinal)
 string serverProgramSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Server", "Program.cs"));
 Assert(serverProgramSource.Contains("app.MapPost(\"/api/settings\"", StringComparison.Ordinal),
     "Docker server UI should let users edit runtime settings instead of only showing template/env defaults");
+Assert(serverProgramSource.Contains("app.MapGet(\"/healthz\"", StringComparison.Ordinal),
+    "Docker server should expose a lightweight health endpoint for container health checks");
 Assert(serverProgramSource.Contains("app.MapGet(\"/api/folders\"", StringComparison.Ordinal),
     "Docker server UI should expose a folder browsing API for directories under /photos");
 Assert(serverProgramSource.Contains("app.MapGet(\"/api/log\"", StringComparison.Ordinal),
@@ -492,6 +494,11 @@ Assert(serverProgramSource.Contains("SavePersistedSettings(settings)", StringCom
     "Docker server settings POST should write persisted settings for container restarts");
 Assert(serverProgramSource.Contains("LoadPersistedSettings(initialSettings)", StringComparison.Ordinal),
     "Docker server startup should reload persisted settings after applying environment defaults");
+
+string dockerfileSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "Dockerfile"));
+Assert(dockerfileSource.Contains("HEALTHCHECK", StringComparison.Ordinal)
+    && dockerfileSource.Contains("/healthz", StringComparison.Ordinal),
+    "Docker image should include a health check against the server health endpoint");
 
 string scannerSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Core", "PhotoAiScanner.cs"));
 Assert(!scannerSource.Contains("Preparing image for {model}", StringComparison.Ordinal),

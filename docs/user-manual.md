@@ -170,6 +170,16 @@ Docker/server logs should persist under:
 
 Run-specific scan/anomaly logs may also be created in the selected photo tree's `.photoai` folder depending on the scanner path.
 
+### Health check
+
+The Docker image exposes a lightweight health endpoint:
+
+```text
+/healthz
+```
+
+Docker and compose deployments use this endpoint to report whether the web server is responding.
+
 ### Recursive / Subfolders
 
 When enabled, Immich Tagger scans subfolders under the selected folder.

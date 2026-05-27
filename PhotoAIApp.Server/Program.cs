@@ -14,6 +14,12 @@ builder.Services.AddSingleton<ScanJobService>();
 var app = builder.Build();
 
 app.MapGet("/", (ImmichTaggerSettings settings, ScanJobService jobs) => Results.Content(RenderHome(settings, jobs.Status), "text/html"));
+app.MapGet("/healthz", (ScanJobService jobs) => Results.Ok(new
+{
+    status = "ok",
+    isRunning = jobs.Status.IsRunning,
+    checkedAt = DateTimeOffset.UtcNow
+}));
 app.MapGet("/api/settings", (ImmichTaggerSettings settings) => Results.Ok(settings));
 app.MapPost("/api/settings", (ImmichTaggerSettings settings, ImmichTaggerSettingsUpdate request) =>
 {

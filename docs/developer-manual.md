@@ -149,6 +149,7 @@ The new server project should own:
 - recent log storage;
 - links to persistent logs;
 - status page/healthcheck;
+- `/healthz` endpoint used by the Dockerfile health check;
 - Docker-friendly path assumptions.
 
 The server should not try to show a native desktop file picker. It should operate on mounted paths visible inside the container, primarily `/photos`.

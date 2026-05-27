@@ -13,7 +13,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gosu \
+    && apt-get install -y --no-install-recommends curl gosu \
     && rm -rf /var/lib/apt/lists/*
 
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080 \
@@ -26,6 +26,7 @@ ENV ASPNETCORE_URLS=http://0.0.0.0:8080 \
 
 EXPOSE 8080
 VOLUME ["/photos", "/config"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
 
 COPY --from=build /app/publish .
 COPY docker/entrypoint.sh /entrypoint.sh
