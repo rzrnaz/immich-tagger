@@ -464,6 +464,29 @@ Assert(advancedSettingsSource.Contains("new ColumnStyle(SizeType.Absolute, 260)"
 Assert(advancedSettingsSource.Contains("Text = \"?\"", StringComparison.Ordinal),
     "Advanced dialog should expose a visible help affordance, not only hidden hover tips");
 
+string serverProgramSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Server", "Program.cs"));
+Assert(serverProgramSource.Contains("app.MapPost(\"/api/settings\"", StringComparison.Ordinal),
+    "Docker server UI should let users edit runtime settings instead of only showing template/env defaults");
+Assert(serverProgramSource.Contains("app.MapGet(\"/api/folders\"", StringComparison.Ordinal),
+    "Docker server UI should expose a folder browsing API for directories under /photos");
+Assert(serverProgramSource.Contains("app.MapGet(\"/api/log\"", StringComparison.Ordinal),
+    "Docker server UI should expose safe log links for run/anomaly logs");
+Assert(serverProgramSource.Contains("validatePathForRead", StringComparison.Ordinal)
+    || serverProgramSource.Contains("ValidatePathForRead", StringComparison.Ordinal),
+    "Docker server log/folder endpoints should validate requested paths before reading server files");
+Assert(serverProgramSource.Contains("id=\"primaryOllamaUrl\"", StringComparison.Ordinal),
+    "Docker server settings editor should expose the primary Ollama URL");
+Assert(serverProgramSource.Contains("id=\"primaryModel\"", StringComparison.Ordinal),
+    "Docker server settings editor should expose the primary model");
+Assert(serverProgramSource.Contains("id=\"fallbackEnabled\"", StringComparison.Ordinal),
+    "Docker server settings editor should expose the fallback enable switch");
+Assert(serverProgramSource.Contains("id=\"overwriteSidecars\"", StringComparison.Ordinal),
+    "Docker server settings editor should expose the overwrite sidecars switch");
+Assert(serverProgramSource.Contains("openLogLink", StringComparison.Ordinal),
+    "Docker server home page should render an Open Log link when a run log path is available");
+Assert(serverProgramSource.Contains("browseFolders", StringComparison.Ordinal),
+    "Docker server home page should include browser JavaScript for folder selection under /photos");
+
 string scannerSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Core", "PhotoAiScanner.cs"));
 Assert(!scannerSource.Contains("Preparing image for {model}", StringComparison.Ordinal),
     "Live log should not include per-image preparation telemetry");
