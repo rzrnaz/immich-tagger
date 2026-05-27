@@ -7,61 +7,61 @@ public sealed class ImmichTaggerSettings
     public const string SectionName = "ImmichTagger";
 
     [ConfigurationKeyName("PHOTO_ROOT")]
-    public string PhotoRoot { get; init; } = "/photos";
+    public string PhotoRoot { get; set; } = "/photos";
 
     [ConfigurationKeyName("CONFIG_ROOT")]
-    public string ConfigRoot { get; init; } = "/config";
+    public string ConfigRoot { get; set; } = "/config";
 
     [ConfigurationKeyName("LOG_ROOT")]
-    public string LogRoot { get; init; } = "/config/logs";
+    public string LogRoot { get; set; } = "/config/logs";
 
     [ConfigurationKeyName("DEFAULT_FOLDER_PATH")]
-    public string DefaultFolderPath { get; init; } = "/photos";
+    public string DefaultFolderPath { get; set; } = "/photos";
 
     [ConfigurationKeyName("RECURSIVE")]
-    public bool Recursive { get; init; } = true;
+    public bool Recursive { get; set; } = true;
 
     [ConfigurationKeyName("FORCE")]
-    public bool Force { get; init; } = true;
+    public bool Force { get; set; } = true;
 
     [ConfigurationKeyName("WRITE_JSON")]
-    public bool WriteJson { get; init; } = true;
+    public bool WriteJson { get; set; } = true;
 
     [ConfigurationKeyName("WRITE_XMP")]
-    public bool WriteXmp { get; init; } = true;
+    public bool WriteXmp { get; set; } = true;
 
     [ConfigurationKeyName("ADD_TAGS")]
-    public bool AddTags { get; init; } = true;
+    public bool AddTags { get; set; } = true;
 
     [ConfigurationKeyName("DRY_RUN_DEFAULT")]
-    public bool DryRunDefault { get; init; } = true;
+    public bool DryRunDefault { get; set; } = true;
 
     [ConfigurationKeyName("OVERWRITE_SIDECARS")]
-    public bool OverwriteSidecars { get; init; }
+    public bool OverwriteSidecars { get; set; }
 
     [ConfigurationKeyName("LIMIT")]
-    public int? Limit { get; init; }
+    public int? Limit { get; set; }
 
     [ConfigurationKeyName("PRIMARY_OLLAMA_URL")]
-    public string PrimaryOllamaUrl { get; init; } = PhotoAiDefaults.UnraidOllamaBaseUrl;
+    public string PrimaryOllamaUrl { get; set; } = PhotoAiDefaults.UnraidOllamaBaseUrl;
 
     [ConfigurationKeyName("PRIMARY_MODEL")]
-    public string PrimaryModel { get; init; } = PhotoAiDefaults.QwenPcModel;
+    public string PrimaryModel { get; set; } = PhotoAiDefaults.QwenPcModel;
 
     [ConfigurationKeyName("MAX_IMAGE_SIZE")]
-    public int MaxImageSize { get; init; } = 0;
+    public int MaxImageSize { get; set; } = 0;
 
     [ConfigurationKeyName("FALLBACK_ENABLED")]
-    public bool FallbackEnabled { get; init; } = true;
+    public bool FallbackEnabled { get; set; } = true;
 
     [ConfigurationKeyName("FALLBACK_OLLAMA_URL")]
-    public string FallbackOllamaUrl { get; init; } = PhotoAiDefaults.UnraidOllamaBaseUrl;
+    public string FallbackOllamaUrl { get; set; } = PhotoAiDefaults.UnraidOllamaBaseUrl;
 
     [ConfigurationKeyName("FALLBACK_MODEL")]
-    public string FallbackModel { get; init; } = PhotoAiDefaults.UnraidModel;
+    public string FallbackModel { get; set; } = PhotoAiDefaults.UnraidModel;
 
     [ConfigurationKeyName("FALLBACK_MAX_IMAGE_SIZE")]
-    public int FallbackMaxImageSize { get; init; } = PhotoAiDefaults.UnraidMaxImageDimensionPixels;
+    public int FallbackMaxImageSize { get; set; } = PhotoAiDefaults.UnraidMaxImageDimensionPixels;
 
     public PhotoAiScanOptions ToScanOptions(string folderPath, bool dryRun, int? limit = null)
     {
