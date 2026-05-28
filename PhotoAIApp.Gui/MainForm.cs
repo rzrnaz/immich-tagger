@@ -299,7 +299,7 @@ public sealed class MainForm : Form
         panel.SetColumnSpan(_inlineFolderPickerHost, 2);
         AddSelectedFolderChecklistRow(panel, 2);
         AddPathRow(panel, 3, "AI profile:", _profileComboBox, _advancedSettingsButton);
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         panel.Controls.Add(new Label
         {
             Text = "Active settings:",
@@ -382,7 +382,7 @@ public sealed class MainForm : Form
             Padding = new Padding(0),
             Margin = new Padding(0)
         };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 860));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 980));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
@@ -398,9 +398,9 @@ public sealed class MainForm : Form
             Padding = new Padding(0)
         };
 
-        ConfigureOptionCheckBox(_recursiveCheckBox, 165);
-        ConfigureOptionCheckBox(_forceCheckBox, 190);
-        ConfigureOptionCheckBox(_overwriteSidecarsCheckBox, 220);
+        ConfigureOptionCheckBox(_recursiveCheckBox, 230);
+        ConfigureOptionCheckBox(_forceCheckBox, 250);
+        ConfigureOptionCheckBox(_overwriteSidecarsCheckBox, 290);
 
         row1.Controls.Add(_recursiveCheckBox);
         row1.Controls.Add(_forceCheckBox);
@@ -416,15 +416,15 @@ public sealed class MainForm : Form
             Padding = new Padding(0)
         };
 
-        ConfigureOptionCheckBox(_dryRunCheckBox, 165);
-        ConfigureOptionCheckBox(_syncImmichCheckBox, 190);
+        ConfigureOptionCheckBox(_dryRunCheckBox, 230);
+        ConfigureOptionCheckBox(_syncImmichCheckBox, 250);
 
         var limitLabel = new Label
         {
             Text = "File Limit",
             TextAlign = ContentAlignment.MiddleLeft,
             AutoSize = false,
-            Width = 110,
+            Width = 140,
             Height = 38,
             Margin = new Padding(10, 2, 4, 0)
         };
@@ -1112,7 +1112,9 @@ public sealed class MainForm : Form
 
         try
         {
-            foreach (string childFolder in Directory.EnumerateDirectories(folderPath).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            foreach (string childFolder in Directory.EnumerateDirectories(folderPath)
+                .Where(folder => !IsExcludedSelectableFolder(folder))
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
             {
                 node.Nodes.Add(CreateFolderTreeNode(childFolder, isChecked: node.Checked));
             }
@@ -1127,12 +1129,25 @@ public sealed class MainForm : Form
     {
         try
         {
-            return Directory.EnumerateDirectories(folderPath).Any();
+            return Directory.EnumerateDirectories(folderPath).Any(folder => !IsExcludedSelectableFolder(folder));
         }
         catch
         {
             return false;
         }
+    }
+
+    private static bool IsExcludedSelectableFolder(string folderPath)
+    {
+        string normalizedPath = Path.GetFullPath(folderPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string[] parts = normalizedPath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        return parts.Any(part =>
+            string.Equals(part, ".photoai", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(part, ".Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(part, "@eaDir", StringComparison.OrdinalIgnoreCase));
     }
 
     private void SetAllSelectableFoldersChecked(bool isChecked)
@@ -1185,7 +1200,7 @@ public sealed class MainForm : Form
 
     private static void AddCheckedFolderPaths(TreeNode node, List<string> folders)
     {
-        if (node.Tag is string folderPath && node.Checked)
+        if (node.Tag is string folderPath && node.Checked && !IsExcludedSelectableFolder(folderPath))
         {
             folders.Add(folderPath);
         }

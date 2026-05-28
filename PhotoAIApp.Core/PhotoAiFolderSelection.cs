@@ -43,6 +43,11 @@ public static class PhotoAiFolderSelection
                 throw new DirectoryNotFoundException($"Selected folder does not exist: {folder}");
             }
 
+            if (IsExcludedScanFolder(folder))
+            {
+                throw new InvalidOperationException($"Selected folder is an internal/system folder and cannot be scanned: {folder}");
+            }
+
             if (normalizedSafetyRoot is not null && !PhotoAiScanner.IsPathUnderRoot(folder, normalizedSafetyRoot))
             {
                 throw new InvalidOperationException($"Selected folder must be inside the configured safety root: {folder}");
@@ -55,5 +60,17 @@ public static class PhotoAiFolderSelection
     private static string NormalizeDirectoryPath(string path)
     {
         return Path.GetFullPath(path.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static bool IsExcludedScanFolder(string folderPath)
+    {
+        string[] parts = NormalizeDirectoryPath(folderPath).Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        return parts.Any(part =>
+            string.Equals(part, ".photoai", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(part, ".Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(part, "@eaDir", StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -49,6 +49,17 @@ try
 
     string[] normalizedWithoutSafetyRoot = PhotoAiFolderSelection.NormalizeAndValidateSelectedFolders([folderA]);
     AssertEqual(1, normalizedWithoutSafetyRoot.Length, "GUI folder selection should no longer require a separate Immich library root/safety root");
+
+    string internalPhotoAiFolder = Path.Combine(multiFolderRoot, ".photoai");
+    Directory.CreateDirectory(internalPhotoAiFolder);
+    try
+    {
+        PhotoAiFolderSelection.NormalizeAndValidateSelectedFolders([internalPhotoAiFolder], multiFolderRoot);
+        throw new InvalidOperationException("Expected internal .photoai folders to be rejected as scan roots.");
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("internal/system folder", StringComparison.OrdinalIgnoreCase))
+    {
+    }
 }
 finally
 {
@@ -453,8 +464,12 @@ Assert(mainFormSource.Contains("Height = 1500", StringComparison.Ordinal),
     "Main window should open at 1500 pixels tall");
 Assert(mainFormSource.Contains("Text = \"Subfolders\", Checked = true", StringComparison.Ordinal),
     "Subfolders checkbox should default to checked");
-Assert(mainFormSource.Contains("ConfigureOptionCheckBox(_dryRunCheckBox, 165)", StringComparison.Ordinal),
-    "Dry Run should occupy the old first option position so Sync Immich aligns with Scan Existing above it");
+Assert(mainFormSource.Contains("ConfigureOptionCheckBox(_dryRunCheckBox, 230)", StringComparison.Ordinal)
+    && mainFormSource.Contains("ConfigureOptionCheckBox(_syncImmichCheckBox, 250)", StringComparison.Ordinal),
+    "Options checkboxes should have DPI-safe widths so labels do not clip on smaller/high-DPI laptop screens");
+Assert(mainFormSource.Contains("!IsExcludedSelectableFolder(folder)", StringComparison.Ordinal)
+    && mainFormSource.Contains("!IsExcludedSelectableFolder(folderPath)", StringComparison.Ordinal),
+    "Folder tree selection should hide/ignore internal .photoai folders so users cannot accidentally scan run logs");
 Assert(mainFormSource.Contains("int? folderLimit = totalLimit is > 0 ? totalLimit.Value - aggregateVisitedFiles : null", StringComparison.Ordinal)
     && mainFormSource.Contains("? summary.WouldProcess", StringComparison.Ordinal)
     && mainFormSource.Contains(": summary.Completed + summary.Failed", StringComparison.Ordinal),
