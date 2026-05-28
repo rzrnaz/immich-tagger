@@ -33,7 +33,7 @@ public sealed class MainForm : Form
     private readonly NumericUpDown _limitNumeric = new() { Minimum = 0, Maximum = 100000, Value = 0, Width = 100 };
     private readonly CheckBox _recursiveCheckBox = new() { Text = "Subfolders", Checked = true, AutoSize = true };
     private readonly CheckBox _forceCheckBox = new() { Text = "Scan Existing", Checked = true, AutoSize = true };
-    private readonly CheckBox _overwriteSidecarsCheckBox = new() { Text = "Overwrite XMP+", Checked = true, AutoSize = true };
+    private readonly CheckBox _overwriteSidecarsCheckBox = new() { Text = "Overwrite XMP", Checked = true, AutoSize = true };
     private readonly CheckBox _modelLogCheckBox = new() { Text = "Model Log", Checked = false, AutoSize = true };
     private readonly CheckBox _dryRunCheckBox = new() { Text = "Dry Run", Checked = true, AutoSize = true };
     private readonly CheckBox _syncImmichCheckBox = new() { Text = "Sync Immich", Checked = false, AutoSize = true };
@@ -504,7 +504,7 @@ public sealed class MainForm : Form
             "Folder source: defaults to P:\\. When the path exists, the folder tree loads automatically.\r\n\r\n" +
             "Selected folders: select every folder to include and unselect folders to exclude. Click the expand control on a folder to show subfolders; subfolders can also be selected, unselected, and expanded. If no tree is loaded, the typed folder source is scanned directly. Enable Subfolders to recurse within each selected folder. Internal .photoai folders are always ignored.\r\n\r\n" +
             "Scan Existing: re-scan images with existing requested sidecars.\r\n\r\n" +
-            "Overwrite XMP+: regenerate existing XMP sidecars and enabled model logs.\r\n\r\n" +
+            "Overwrite XMP: regenerate existing XMP sidecars and enabled model logs.\r\n\r\n" +
             "Model Log: keep optional .photoai.json diagnostics next to each image. Leave unchecked for normal Immich XMP-only output; the run/anomaly log is still kept.\r\n\r\n" +
             "Dry Run: preview without changing files or calling Ollama.\r\n\r\n" +
             "Sync Immich: after a live scan, trigger Immich Sidecar Metadata Discover and then Sync. This is skipped for dry runs.\r\n\r\n" +
