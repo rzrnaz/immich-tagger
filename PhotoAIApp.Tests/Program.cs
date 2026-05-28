@@ -439,8 +439,35 @@ Assert(!mainFormSource.Contains("CheckedListBox", StringComparison.Ordinal),
     "Main GUI should not use the old flat checked list for folder selection");
 Assert(!mainFormSource.Contains("PhotoAiFolderSelection.MaxSelectedFolders", StringComparison.Ordinal),
     "Main GUI should not enforce an artificial 1-5 folder cap; 1-5 is only a usage pattern");
-Assert(mainFormSource.Contains("UnloadModelsAtEnd = index == selectedFolders.Length - 1", StringComparison.Ordinal),
-    "Multi-folder runs should keep models loaded between queued folders and unload after the last folder");
+Assert(mainFormSource.Contains("UnloadModelsAtEnd = unloadModelsAfterFolder", StringComparison.Ordinal)
+    && mainFormSource.Contains("bool unloadModelsAfterFolder = index == selectedFolders.Length - 1 || totalLimit is > 0", StringComparison.Ordinal),
+    "Multi-folder runs should keep models loaded between normal queued folders and unload safely for total-limit-shortened runs");
+
+Assert(mainFormSource.Contains("AddTags = true", StringComparison.Ordinal),
+    "GUI scans should always add tags now that the Add Tags checkbox has been removed");
+Assert(!mainFormSource.Contains("Text = \"Add Tags\"", StringComparison.Ordinal),
+    "Main GUI should not expose the removed Add Tags checkbox");
+Assert(mainFormSource.Contains("Text = \"Sync Immich\", Checked = false", StringComparison.Ordinal),
+    "Main GUI should expose a default-unchecked Sync Immich checkbox");
+Assert(mainFormSource.Contains("Height = 1500", StringComparison.Ordinal),
+    "Main window should open at 1500 pixels tall");
+Assert(mainFormSource.Contains("Text = \"Subfolders\", Checked = true", StringComparison.Ordinal),
+    "Subfolders checkbox should default to checked");
+Assert(mainFormSource.Contains("ConfigureOptionCheckBox(_dryRunCheckBox, 165)", StringComparison.Ordinal),
+    "Dry Run should occupy the old first option position so Sync Immich aligns with Scan Existing above it");
+Assert(mainFormSource.Contains("int? folderLimit = totalLimit is > 0 ? totalLimit.Value - aggregateVisitedFiles : null", StringComparison.Ordinal)
+    && mainFormSource.Contains("? summary.WouldProcess", StringComparison.Ordinal)
+    && mainFormSource.Contains(": summary.Completed + summary.Failed", StringComparison.Ordinal),
+    "File Limit should be applied to the aggregate attempted/converted count, not independently per selected folder or skipped file");
+Assert(mainFormSource.Contains("/api/jobs/sidecar", StringComparison.Ordinal),
+    "Sync Immich should call the Immich sidecar job endpoint");
+Assert(mainFormSource.Contains("force: false", StringComparison.Ordinal) && mainFormSource.Contains("force: true", StringComparison.Ordinal),
+    "Sync Immich should run both sidecar Discover and Sync requests");
+Assert(mainFormSource.Contains("IMMICH SYNC discover requested", StringComparison.Ordinal) && mainFormSource.Contains("AppendPermanentRunLogLineAsync", StringComparison.Ordinal),
+    "Sync Immich calls should be written to the permanent run log as well as the running GUI log");
+Assert(mainFormSource.Contains("http.GetAsync(\"/api/jobs\"", StringComparison.Ordinal)
+    && mainFormSource.Contains("WaitForImmichSidecarQueueIdleAsync", StringComparison.Ordinal),
+    "Sync Immich should poll Immich job status before starting sidecar jobs so Discover and Sync do not overlap");
 
 string advancedSettingsSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Gui", "AdvancedSettingsForm.cs"));
 Assert(advancedSettingsSource.Contains("Test fallback", StringComparison.Ordinal),
@@ -555,6 +582,46 @@ try
 finally
 {
     Directory.Delete(tempRoot, recursive: true);
+}
+
+string limitSkipsRoot = Path.Combine(Path.GetTempPath(), $"photoai-limit-skips-tests-{Guid.NewGuid():N}");
+Directory.CreateDirectory(limitSkipsRoot);
+try
+{
+    for (int index = 1; index <= 6; index++)
+    {
+        string imagePath = Path.Combine(limitSkipsRoot, $"image-{index:00}.jpg");
+        await File.WriteAllTextAsync(imagePath, "fake image content");
+        if (index <= 3)
+        {
+            string sidecarPath = PhotoAiScanner.GetPhotoAiSidecarPath(imagePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
+            await File.WriteAllTextAsync(sidecarPath, "{}");
+        }
+    }
+
+    var limitedDryRunSummary = await new PhotoAiScanner().ScanFolderAsync(
+        new PhotoAiScanOptions
+        {
+            FolderPath = limitSkipsRoot,
+            SafetyRootPath = limitSkipsRoot,
+            Recursive = false,
+            DryRun = true,
+            Force = false,
+            WriteJson = true,
+            WriteXmp = true,
+            OverwriteJson = true,
+            OverwriteXmp = true,
+            Limit = 3
+        });
+
+    AssertEqual(6, limitedDryRunSummary.ImagesFound, "Limit should not hide total candidate image count");
+    AssertEqual(3, limitedDryRunSummary.Skipped, "Limit should allow skipped files before the processing quota is filled");
+    AssertEqual(3, limitedDryRunSummary.WouldProcess, "Limit should count non-skipped files to process, not skipped files");
+}
+finally
+{
+    Directory.Delete(limitSkipsRoot, recursive: true);
 }
 
 string aggregateProgressRoot = Path.Combine(Path.GetTempPath(), $"photoai-aggregate-progress-tests-{Guid.NewGuid():N}");

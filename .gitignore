@@ -24,3 +24,6 @@ __pycache__/
 # Logs/temp
 *.log
 *.tmp
+
+# Local Immich sync secrets/config copied next to release builds as needed
+immich-sync.json

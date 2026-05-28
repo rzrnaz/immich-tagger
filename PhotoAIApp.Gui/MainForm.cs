@@ -1,6 +1,7 @@
 using PhotoAIApp.Core;
 using System.Diagnostics;
 using System.Drawing;
+using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -30,11 +31,11 @@ public sealed class MainForm : Form
         Margin = new Padding(0, 2, 8, 4)
     };
     private readonly NumericUpDown _limitNumeric = new() { Minimum = 0, Maximum = 100000, Value = 0, Width = 100 };
-    private readonly CheckBox _recursiveCheckBox = new() { Text = "Subfolders", AutoSize = true };
+    private readonly CheckBox _recursiveCheckBox = new() { Text = "Subfolders", Checked = true, AutoSize = true };
     private readonly CheckBox _forceCheckBox = new() { Text = "Scan Existing", Checked = true, AutoSize = true };
     private readonly CheckBox _overwriteSidecarsCheckBox = new() { Text = "Overwrite XMP+", Checked = true, AutoSize = true };
-    private readonly CheckBox _addTagsCheckBox = new() { Text = "Add Tags", Checked = false, AutoSize = true };
     private readonly CheckBox _dryRunCheckBox = new() { Text = "Dry Run", Checked = true, AutoSize = true };
+    private readonly CheckBox _syncImmichCheckBox = new() { Text = "Sync Immich", Checked = false, AutoSize = true };
     private readonly Button _browseSelectedFolderButton = new() { Text = "Browse...", Width = 120, Height = 40 };
     private readonly Button _runButton = new() { Text = "Run Scan", Width = 130, Height = 40 };
     private readonly Button _pauseButton = new() { Text = "Pause", Width = 100, Height = 40, Enabled = false };
@@ -103,7 +104,7 @@ public sealed class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 10F);
         Width = 1300;
-        Height = 1020;
+        Height = 1500;
         MinimumSize = new Size(980, 820);
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
@@ -175,8 +176,8 @@ public sealed class MainForm : Form
         _toolTip.SetToolTip(_recursiveCheckBox, "Include images in subfolders. Internal .photoai log folders are always ignored.");
         _toolTip.SetToolTip(_forceCheckBox, "When checked, images with an existing .photoai.json can be considered for re-scan. When unchecked, existing PhotoAI JSON means skip the image.");
         _toolTip.SetToolTip(_overwriteSidecarsCheckBox, "When checked, existing .photoai.json and .jpg.xmp sidecars are regenerated together. When unchecked, existing sidecars are protected and no-op images skip the LLM.");
-        _toolTip.SetToolTip(_addTagsCheckBox, "When checked, generated tags are written to the XMP sidecar in addition to description/caption fields.");
         _toolTip.SetToolTip(_dryRunCheckBox, "Preview what would be scanned/written without calling Ollama or changing files.");
+        _toolTip.SetToolTip(_syncImmichCheckBox, "After a successful live scan, ask Immich to Discover new sidecar metadata and then Sync existing sidecar metadata.");
         _toolTip.SetToolTip(_limitNumeric, "Optional maximum number of images to process. 0 means no limit.");
         _toolTip.SetToolTip(_logTextBox, "Shows the 10 most recent run messages. Use Open log after a live run for the full .photoai anomaly log.");
     }
@@ -415,8 +416,8 @@ public sealed class MainForm : Form
             Padding = new Padding(0)
         };
 
-        ConfigureOptionCheckBox(_addTagsCheckBox, 190);
-        ConfigureOptionCheckBox(_dryRunCheckBox, 150);
+        ConfigureOptionCheckBox(_dryRunCheckBox, 165);
+        ConfigureOptionCheckBox(_syncImmichCheckBox, 190);
 
         var limitLabel = new Label
         {
@@ -432,8 +433,8 @@ public sealed class MainForm : Form
         _limitNumeric.Height = 38;
         _limitNumeric.Margin = new Padding(0, 2, 14, 0);
 
-        row2.Controls.Add(_addTagsCheckBox);
         row2.Controls.Add(_dryRunCheckBox);
+        row2.Controls.Add(_syncImmichCheckBox);
         row2.Controls.Add(limitLabel);
         row2.Controls.Add(_limitNumeric);
 
@@ -501,6 +502,7 @@ public sealed class MainForm : Form
             "Scan Existing: re-scan images with existing PhotoAI JSON.\r\n\r\n" +
             "Overwrite XMP+: regenerate JSON and XMP together.\r\n\r\n" +
             "Dry Run: preview without changing files or calling Ollama.\r\n\r\n" +
+            "Sync Immich: after a live scan, trigger Immich Sidecar Metadata Discover and then Sync. This is skipped for dry runs.\r\n\r\n" +
             "The live log shows the 10 most recent messages; Open log shows the full run log after a live scan.",
             "PhotoAIApp help",
             MessageBoxButtons.OK,
@@ -1206,12 +1208,18 @@ public sealed class MainForm : Form
         return PhotoAiFolderSelection.NormalizeAndValidateSelectedFolders(selectedFolders);
     }
 
-    private static int CountAggregateCandidateImages(IEnumerable<string> selectedFolders, bool recursive, int? perFolderLimit)
+    private static int CountAggregateCandidateImages(IEnumerable<string> selectedFolders, bool recursive, int? totalLimit)
     {
         int total = 0;
         foreach (string folder in selectedFolders)
         {
-            total += CountCandidateImages(folder, recursive, perFolderLimit);
+            int? remainingLimit = totalLimit is > 0 ? totalLimit.Value - total : null;
+            if (remainingLimit is <= 0)
+            {
+                break;
+            }
+
+            total += CountCandidateImages(folder, recursive, remainingLimit);
         }
 
         return total;
@@ -1238,6 +1246,13 @@ public sealed class MainForm : Form
         }
 
         return count;
+    }
+
+    private static int CountVisitedFiles(PhotoAiScanSummary summary)
+    {
+        return summary.DryRun
+            ? summary.WouldProcess
+            : summary.Completed + summary.Failed;
     }
 
     private async Task RunScanAsync()
@@ -1282,9 +1297,10 @@ public sealed class MainForm : Form
 
         try
         {
-            int? perFolderLimit = _limitNumeric.Value > 0 ? (int)_limitNumeric.Value : null;
+            int? totalLimit = _limitNumeric.Value > 0 ? (int)_limitNumeric.Value : null;
             DateTimeOffset aggregateStartTime = DateTimeOffset.Now;
-            int aggregateTotalFiles = CountAggregateCandidateImages(selectedFolders, _recursiveCheckBox.Checked, perFolderLimit);
+            int aggregateTotalFiles = CountAggregateCandidateImages(selectedFolders, _recursiveCheckBox.Checked, null);
+            int aggregateVisitedFiles = 0;
             int aggregateCompletedOffset = 0;
             int aggregateSkippedOffset = 0;
             int aggregateFailedOffset = 0;
@@ -1299,7 +1315,14 @@ public sealed class MainForm : Form
             var summaries = new List<PhotoAiScanSummary>();
             for (int index = 0; index < selectedFolders.Length; index++)
             {
+                if (totalLimit is > 0 && aggregateVisitedFiles >= totalLimit.Value)
+                {
+                    break;
+                }
+
                 string folder = selectedFolders[index];
+                int? folderLimit = totalLimit is > 0 ? totalLimit.Value - aggregateVisitedFiles : null;
+                bool unloadModelsAfterFolder = index == selectedFolders.Length - 1 || totalLimit is > 0;
                 AppendLog(selectedFolders.Length == 1
                     ? $"Starting scan: {folder}"
                     : $"Starting folder {index + 1}/{selectedFolders.Length}: {folder}");
@@ -1315,7 +1338,7 @@ public sealed class MainForm : Form
                         WriteXmp = true,
                         OverwriteJson = _overwriteSidecarsCheckBox.Checked,
                         OverwriteXmp = _overwriteSidecarsCheckBox.Checked,
-                        AddTags = _addTagsCheckBox.Checked,
+                        AddTags = true,
                         DryRun = _dryRunCheckBox.Checked,
                         OllamaBaseUrl = _activeProfile.OllamaBaseUrl,
                         Model = _activeProfile.Model,
@@ -1325,8 +1348,8 @@ public sealed class MainForm : Form
                         MaxImageDimensionPixels = _activeProfile.MaxImageDimensionPixels,
                         FallbackMaxImageDimensionPixels = _activeProfile.FallbackMaxImageDimensionPixels,
                         PauseController = _pauseController,
-                        Limit = perFolderLimit,
-                        UnloadModelsAtEnd = index == selectedFolders.Length - 1,
+                        Limit = folderLimit,
+                        UnloadModelsAtEnd = unloadModelsAfterFolder,
                         ProgressCompletedOffset = aggregateCompletedOffset,
                         ProgressSkippedOffset = aggregateSkippedOffset,
                         ProgressFailedOffset = aggregateFailedOffset,
@@ -1338,6 +1361,8 @@ public sealed class MainForm : Form
                     progress,
                     _cancellationTokenSource.Token);
                 summaries.Add(folderSummary);
+                int folderVisitedFiles = CountVisitedFiles(folderSummary);
+                aggregateVisitedFiles += folderVisitedFiles;
                 aggregateCompletedOffset += folderSummary.DryRun ? folderSummary.WouldProcess : folderSummary.Completed;
                 aggregateSkippedOffset += folderSummary.Skipped;
                 aggregateFailedOffset += folderSummary.Failed;
@@ -1358,6 +1383,32 @@ public sealed class MainForm : Form
             _openLogButton.Enabled = !summary.DryRun && File.Exists(_lastRunLogPath);
 
             PhotoAiRunSummaryDocument summaryDocument = PhotoAiRunSummaryDocument.FromSummary(summary);
+            if (_syncImmichCheckBox.Checked)
+            {
+                if (summary.DryRun)
+                {
+                    AppendLog("Sync Immich skipped for dry run.");
+                }
+                else
+                {
+                    try
+                    {
+                        await SyncImmichSidecarMetadataAsync(_cancellationTokenSource.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendLog("Sync Immich failed:");
+                        AppendLog(ex.Message);
+                        await AppendPermanentRunLogLineAsync($"IMMICH SYNC failed: {ex.Message}", CancellationToken.None);
+                        MessageBox.Show(this, ex.Message, "Immich sync error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+            }
+
             AppendLog("Scan complete. Summary opened in a separate window.");
             _statusTimer.Stop();
             SetRunningState(false);
@@ -1387,6 +1438,236 @@ public sealed class MainForm : Form
         }
     }
 
+    private async Task SyncImmichSidecarMetadataAsync(CancellationToken cancellationToken)
+    {
+        ImmichSyncConfig config = LoadImmichSyncConfig();
+        if (string.IsNullOrWhiteSpace(config.ApiKey))
+        {
+            AppendLog("Sync Immich skipped: missing Immich API key. Set PHOTOAI_IMMICH_API_KEY or place immich-sync.json next to the app.");
+            await AppendPermanentRunLogLineAsync("IMMICH SYNC skipped: missing Immich API key", cancellationToken);
+            return;
+        }
+
+        using HttpClient http = CreateImmichHttpClient(config);
+
+        AppendLog("Sync Immich: checking sidecar job...");
+        await WaitForImmichSidecarQueueIdleAsync(http, "before discover", cancellationToken);
+
+        AppendLog("Sync Immich: Discover sidecar metadata...");
+        await AppendPermanentRunLogLineAsync($"IMMICH SYNC discover requested: endpoint={config.BaseUrl}/api/jobs/sidecar force=false", cancellationToken);
+        await RunImmichSidecarQueueCommandAsync(http, force: false, cancellationToken);
+        await AppendPermanentRunLogLineAsync("IMMICH SYNC discover accepted", cancellationToken);
+
+        AppendLog("Sync Immich: waiting for Discover to finish...");
+        await WaitForImmichSidecarQueueIdleAsync(http, "after discover", cancellationToken);
+
+        AppendLog("Sync Immich: Sync sidecar metadata...");
+        await AppendPermanentRunLogLineAsync($"IMMICH SYNC sync requested: endpoint={config.BaseUrl}/api/jobs/sidecar force=true", cancellationToken);
+        await RunImmichSidecarQueueCommandAsync(http, force: true, cancellationToken);
+        await AppendPermanentRunLogLineAsync("IMMICH SYNC sync accepted", cancellationToken);
+
+        AppendLog("Sync Immich requests sent.");
+        await AppendPermanentRunLogLineAsync("IMMICH SYNC requests sent", cancellationToken);
+    }
+
+    private async Task AppendPermanentRunLogLineAsync(string message, CancellationToken cancellationToken)
+    {
+        string? runLogPath = _lastRunLogPath;
+        if (string.IsNullOrWhiteSpace(runLogPath) || !File.Exists(runLogPath))
+        {
+            return;
+        }
+
+        string line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}] {message}";
+        await File.AppendAllTextAsync(runLogPath, line + Environment.NewLine, cancellationToken);
+    }
+
+    private static ImmichSyncConfig LoadImmichSyncConfig()
+    {
+        var config = new ImmichSyncConfig
+        {
+            BaseUrl = Environment.GetEnvironmentVariable("PHOTOAI_IMMICH_BASE_URL")
+                ?? Environment.GetEnvironmentVariable("IMMICH_BASE_URL")
+                ?? "http://192.168.1.8:2283",
+            ApiKey = Environment.GetEnvironmentVariable("PHOTOAI_IMMICH_API_KEY")
+                ?? Environment.GetEnvironmentVariable("IMMICH_API_KEY")
+        };
+
+        string configPath = Path.Combine(AppContext.BaseDirectory, "immich-sync.json");
+        if (File.Exists(configPath))
+        {
+            try
+            {
+                string json = File.ReadAllText(configPath);
+                ImmichSyncConfig? fileConfig = JsonSerializer.Deserialize<ImmichSyncConfig>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                if (!string.IsNullOrWhiteSpace(fileConfig?.BaseUrl))
+                {
+                    config.BaseUrl = fileConfig.BaseUrl;
+                }
+
+                if (!string.IsNullOrWhiteSpace(fileConfig?.ApiKey))
+                {
+                    config.ApiKey = fileConfig.ApiKey;
+                }
+            }
+            catch
+            {
+                // Fall back to environment/defaults; the caller will report a missing key if none is available.
+            }
+        }
+
+        config.BaseUrl = (config.BaseUrl ?? "http://192.168.1.8:2283").Trim().TrimEnd('/');
+        config.ApiKey = config.ApiKey?.Trim();
+        return config;
+    }
+
+    private static HttpClient CreateImmichHttpClient(ImmichSyncConfig config)
+    {
+        var http = new HttpClient
+        {
+            BaseAddress = new Uri(config.BaseUrl!),
+            Timeout = TimeSpan.FromSeconds(30)
+        };
+        http.DefaultRequestHeaders.Add("x-api-key", config.ApiKey);
+        return http;
+    }
+
+    private async Task RunImmichSidecarQueueCommandAsync(HttpClient http, bool force, CancellationToken cancellationToken)
+    {
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            using var payload = JsonContent.Create(new
+            {
+                command = "start",
+                force
+            });
+
+            using HttpResponseMessage response = await http.PutAsync("/api/jobs/sidecar", payload, cancellationToken);
+            string responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            if ((int)response.StatusCode == 400 && responseBody.Contains("Job is already running", StringComparison.OrdinalIgnoreCase))
+            {
+                string operation = force ? "sync" : "discover";
+                AppendLog($"Sync Immich: sidecar job already running; waiting before retrying {operation}...");
+                await AppendPermanentRunLogLineAsync($"IMMICH SYNC {operation} delayed: sidecar job already running", cancellationToken);
+                await WaitForImmichSidecarQueueIdleAsync(http, $"retry {operation}", cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                continue;
+            }
+
+            throw new InvalidOperationException($"Immich sidecar {(force ? "sync" : "discover")} request failed: {(int)response.StatusCode} {response.ReasonPhrase}. {responseBody}");
+        }
+
+        throw new InvalidOperationException($"Immich sidecar {(force ? "sync" : "discover")} request failed: sidecar job was still running after waiting and retrying.");
+    }
+
+    private async Task WaitForImmichSidecarQueueIdleAsync(HttpClient http, string context, CancellationToken cancellationToken)
+    {
+        TimeSpan timeout = TimeSpan.FromMinutes(10);
+        TimeSpan delay = TimeSpan.FromSeconds(5);
+        DateTimeOffset deadline = DateTimeOffset.Now + timeout;
+        bool loggedWaiting = false;
+
+        while (true)
+        {
+            ImmichSidecarQueueSnapshot snapshot = await GetImmichSidecarQueueSnapshotAsync(http, cancellationToken);
+            if (!snapshot.IsBusy)
+            {
+                if (loggedWaiting)
+                {
+                    AppendLog("Sync Immich: sidecar job is idle.");
+                    await AppendPermanentRunLogLineAsync($"IMMICH SYNC sidecar job idle: {context}", cancellationToken);
+                }
+                return;
+            }
+
+            if (!loggedWaiting)
+            {
+                string details = $"active={snapshot.Active}, waiting={snapshot.Waiting}, delayed={snapshot.Delayed}, paused={snapshot.Paused}, queue_active={snapshot.QueueIsActive}";
+                AppendLog("Sync Immich: sidecar job is already running; waiting...");
+                await AppendPermanentRunLogLineAsync($"IMMICH SYNC waiting for sidecar job idle: {context}; {details}", cancellationToken);
+                loggedWaiting = true;
+            }
+
+            if (DateTimeOffset.Now >= deadline)
+            {
+                throw new InvalidOperationException($"Immich sidecar job was still busy after {timeout.TotalMinutes:0} minutes while waiting {context}.");
+            }
+
+            await Task.Delay(delay, cancellationToken);
+        }
+    }
+
+    private static async Task<ImmichSidecarQueueSnapshot> GetImmichSidecarQueueSnapshotAsync(HttpClient http, CancellationToken cancellationToken)
+    {
+        using HttpResponseMessage response = await http.GetAsync("/api/jobs", cancellationToken);
+        string responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Immich jobs status request failed: {(int)response.StatusCode} {response.ReasonPhrase}. {responseBody}");
+        }
+
+        using JsonDocument document = JsonDocument.Parse(responseBody);
+        if (!document.RootElement.TryGetProperty("sidecar", out JsonElement sidecar))
+        {
+            throw new InvalidOperationException("Immich jobs status response did not include a sidecar queue.");
+        }
+
+        bool queueIsActive = false;
+        bool queueIsPaused = false;
+        if (sidecar.TryGetProperty("queueStatus", out JsonElement queueStatus))
+        {
+            queueIsActive = GetBooleanProperty(queueStatus, "isActive");
+            queueIsPaused = GetBooleanProperty(queueStatus, "isPaused");
+        }
+
+        int active = 0;
+        int waiting = 0;
+        int delayed = 0;
+        int paused = 0;
+        if (sidecar.TryGetProperty("jobCounts", out JsonElement jobCounts))
+        {
+            active = GetIntProperty(jobCounts, "active");
+            waiting = GetIntProperty(jobCounts, "waiting");
+            delayed = GetIntProperty(jobCounts, "delayed");
+            paused = GetIntProperty(jobCounts, "paused");
+        }
+
+        return new ImmichSidecarQueueSnapshot(queueIsActive, queueIsPaused, active, waiting, delayed, paused);
+    }
+
+    private static bool GetBooleanProperty(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out JsonElement value)
+            && value.ValueKind == JsonValueKind.True;
+    }
+
+    private static int GetIntProperty(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out JsonElement value) && value.TryGetInt32(out int result)
+            ? result
+            : 0;
+    }
+
+    private sealed record ImmichSidecarQueueSnapshot(bool QueueIsActive, bool QueueIsPaused, int Active, int Waiting, int Delayed, int Paused)
+    {
+        public bool IsBusy => QueueIsActive || Active > 0 || Waiting > 0 || Delayed > 0 || Paused > 0;
+    }
+
+    private sealed class ImmichSyncConfig
+    {
+        public string? BaseUrl { get; set; }
+        public string? ApiKey { get; set; }
+    }
+
     private void SetRunningState(bool running)
     {
         _runButton.Enabled = !running;
@@ -1401,8 +1682,8 @@ public sealed class MainForm : Form
         _recursiveCheckBox.Enabled = !running;
         _forceCheckBox.Enabled = !running;
         _overwriteSidecarsCheckBox.Enabled = !running;
-        _addTagsCheckBox.Enabled = !running;
         _dryRunCheckBox.Enabled = !running;
+        _syncImmichCheckBox.Enabled = !running;
         _limitNumeric.Enabled = !running;
         if (running)
         {

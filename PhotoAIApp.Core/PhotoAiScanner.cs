@@ -229,9 +229,10 @@ public sealed class PhotoAiScanner
                 continue;
             }
 
-            if (options.Limit is > 0 && summary.Completed >= options.Limit.Value)
+            int attemptedNonSkippedImages = summary.Completed + summary.Failed;
+            if (options.Limit is > 0 && attemptedNonSkippedImages >= options.Limit.Value)
             {
-                Report(progress, "LIMIT", $"Limit reached after processing {summary.Completed} non-skipped images.");
+                Report(progress, "LIMIT", $"Limit reached after processing {attemptedNonSkippedImages} non-skipped images.");
                 break;
             }
 
