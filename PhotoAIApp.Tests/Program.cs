@@ -60,6 +60,20 @@ try
     catch (InvalidOperationException ex) when (ex.Message.Contains("internal/system folder", StringComparison.OrdinalIgnoreCase))
     {
     }
+
+    string realPhoto = Path.Combine(folderA, "real.jpg");
+    File.WriteAllText(realPhoto, "not a real jpeg but enough for enumeration tests");
+    string immichThumbsFolder = Path.Combine(multiFolderRoot, "thumbs", "98cc9547-bd4a-46f7-886c-035094d1bc8f", "96", "5b");
+    Directory.CreateDirectory(immichThumbsFolder);
+    string thumbnailPhoto = Path.Combine(immichThumbsFolder, "thumbnail.jpg");
+    File.WriteAllText(thumbnailPhoto, "thumbnail should not be scanned");
+
+    Assert(PhotoAiScanner.IsInExcludedScanDirectory(thumbnailPhoto, multiFolderRoot), "Immich thumbs folders should be treated as internal generated content");
+    Assert(PhotoAiScanner.IsExcludedScanDirectoryPath(immichThumbsFolder, multiFolderRoot), "Immich thumbs directory paths should be excluded before recursive descent");
+
+    IReadOnlyList<string> supportedImages = PhotoAiScanner.GetSupportedImagePaths(multiFolderRoot, recursive: true);
+    AssertEqual(1, supportedImages.Count, "Safe image enumeration should skip Immich thumbs and only include real library images");
+    AssertEqual(Path.GetFullPath(realPhoto), supportedImages[0], "Safe image enumeration should preserve real images outside excluded folders");
 }
 finally
 {
@@ -110,6 +124,7 @@ AssertEqual(1440, balancedProfile.MaxImageDimensionPixels, "Balanced preset shou
 Assert(balancedProfile.Summary.Contains("1440", StringComparison.Ordinal), "Balanced summary should include max image edge");
 
 var compatibilityProfile = PhotoAiModelProfile.GetPreset(PhotoAiModelProfileId.Compatibility);
+AssertEqual("Compatibility - Unraid MiniCPM-V full-res", compatibilityProfile.DisplayName, "Compatibility preset label should make full-res MiniCPM obvious");
 AssertEqual(PhotoAiModelPreference.UnraidMiniCpmOnly, compatibilityProfile.ModelPreference, "Compatibility preset should target Unraid MiniCPM directly");
 AssertEqual("http://192.168.1.8:11434", compatibilityProfile.OllamaBaseUrl, "Compatibility preset should target Unraid Ollama");
 AssertEqual("minicpm-v:latest", compatibilityProfile.Model, "Compatibility preset should use MiniCPM-V");
@@ -235,6 +250,22 @@ var legacyXmpOverwritePlan = PhotoAiScanner.PlanSidecarWrites(
 AssertEqual(true, legacyXmpOverwritePlan.EffectiveOverwriteSidecars, "Legacy OverwriteXmp should enable bundled sidecar overwrite");
 AssertEqual(true, legacyXmpOverwritePlan.CanWriteJson, "Bundled overwrite should make JSON writable when XMP overwrite was requested");
 AssertEqual(true, legacyXmpOverwritePlan.CanWriteXmp, "Bundled overwrite should make XMP writable");
+
+var modelLogOffMissingXmpPlan = PhotoAiScanner.PlanSidecarWrites(
+    new PhotoAiScanOptions
+    {
+        WriteJson = false,
+        WriteXmp = true,
+        OverwriteJson = false,
+        OverwriteXmp = false
+    },
+    jsonExists: true,
+    xmpExists: false);
+
+AssertEqual(false, modelLogOffMissingXmpPlan.CanWriteJson, "Model Log off should not write PhotoAI JSON even when an old JSON already exists");
+AssertEqual(true, modelLogOffMissingXmpPlan.CanWriteXmp, "Model Log off should still allow the required Immich XMP to be generated");
+AssertEqual(true, modelLogOffMissingXmpPlan.ShouldAnalyze, "Scanner should still call the model when XMP is missing even if JSON/model logging is disabled");
+AssertEqual(false, new ImmichTaggerSettings().WriteJson, "Immich Tagger server/default settings should leave Model Log JSON off by default");
 
 var estimatingSnapshot = PhotoAiRunProgressSnapshot.Create(
     state: PhotoAiRunState.Running,
@@ -460,6 +491,14 @@ Assert(!mainFormSource.Contains("Text = \"Add Tags\"", StringComparison.Ordinal)
     "Main GUI should not expose the removed Add Tags checkbox");
 Assert(mainFormSource.Contains("Text = \"Sync Immich\", Checked = false", StringComparison.Ordinal),
     "Main GUI should expose a default-unchecked Sync Immich checkbox");
+Assert(mainFormSource.Contains("Text = \"Model Log\", Checked = false", StringComparison.Ordinal),
+    "Main GUI should expose a default-unchecked Model Log checkbox for optional PhotoAI JSON diagnostics");
+Assert(mainFormSource.Contains("WriteJson = _modelLogCheckBox.Checked", StringComparison.Ordinal),
+    "Main GUI should only write PhotoAI JSON model logs when the Model Log checkbox is checked");
+Assert(mainFormSource.Contains("_toolTip.SetToolTip(_modelLogCheckBox", StringComparison.Ordinal),
+    "Main GUI should explain that Model Log keeps optional .photoai.json diagnostics");
+Assert(mainFormSource.Contains("Model Log: keep optional .photoai.json diagnostics", StringComparison.Ordinal),
+    "Main help should document that Model Log controls optional JSON diagnostics");
 Assert(mainFormSource.Contains("Height = 1500", StringComparison.Ordinal),
     "Main window should open at 1500 pixels tall");
 Assert(mainFormSource.Contains("Text = \"Subfolders\", Checked = true", StringComparison.Ordinal),
@@ -637,6 +676,42 @@ try
 finally
 {
     Directory.Delete(limitSkipsRoot, recursive: true);
+}
+
+string modelLogOffRoot = Path.Combine(Path.GetTempPath(), $"photoai-model-log-off-tests-{Guid.NewGuid():N}");
+Directory.CreateDirectory(modelLogOffRoot);
+try
+{
+    string imagePath = Path.Combine(modelLogOffRoot, "json-only.jpg");
+    await File.WriteAllTextAsync(imagePath, "fake image content");
+    string oldJsonSidecarPath = PhotoAiScanner.GetPhotoAiSidecarPath(imagePath);
+    Directory.CreateDirectory(Path.GetDirectoryName(oldJsonSidecarPath)!);
+    await File.WriteAllTextAsync(oldJsonSidecarPath, "{}");
+
+    var modelLogOffDryRunSummary = await new PhotoAiScanner().ScanFolderAsync(
+        new PhotoAiScanOptions
+        {
+            FolderPath = modelLogOffRoot,
+            SafetyRootPath = modelLogOffRoot,
+            Recursive = false,
+            DryRun = true,
+            Force = false,
+            WriteJson = false,
+            WriteXmp = true,
+            OverwriteJson = false,
+            OverwriteXmp = false,
+            Limit = 1
+        });
+
+    AssertEqual(1, modelLogOffDryRunSummary.ImagesFound, "Model Log off dry run should still count the image");
+    AssertEqual(0, modelLogOffDryRunSummary.Skipped, "Existing PhotoAI JSON alone should not skip an image when Model Log is off and XMP is missing");
+    AssertEqual(1, modelLogOffDryRunSummary.WouldProcess, "Scanner should plan to process an image with old JSON but missing XMP when Model Log is off");
+    AssertEqual(0, modelLogOffDryRunSummary.WouldWriteJsonSidecar, "Model Log off dry run should not plan to write PhotoAI JSON");
+    AssertEqual(1, modelLogOffDryRunSummary.WouldWriteXmpSidecar, "Model Log off dry run should still plan to write Immich XMP");
+}
+finally
+{
+    Directory.Delete(modelLogOffRoot, recursive: true);
 }
 
 string aggregateProgressRoot = Path.Combine(Path.GetTempPath(), $"photoai-aggregate-progress-tests-{Guid.NewGuid():N}");

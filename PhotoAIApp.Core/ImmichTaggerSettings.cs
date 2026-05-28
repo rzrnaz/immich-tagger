@@ -25,7 +25,7 @@ public sealed class ImmichTaggerSettings
     public bool Force { get; set; } = true;
 
     [ConfigurationKeyName("WRITE_JSON")]
-    public bool WriteJson { get; set; } = true;
+    public bool WriteJson { get; set; } = false;
 
     [ConfigurationKeyName("WRITE_XMP")]
     public bool WriteXmp { get; set; } = true;

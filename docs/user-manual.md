@@ -1,477 +1,119 @@
 # Immich Tagger User Manual
 
-Immich Tagger is the new name and direction for the former PhotoAIApp project.
-
-Tagline:
-
-```text
-AI-powered tags, descriptions, and XMP sidecars for Immich photo libraries.
-```
-
-Immich Tagger scans folders of photos, sends each selected image to an Ollama vision model, and writes metadata sidecars that Immich can discover and sync. The larger value is automated tagging, but descriptions/captions are also generated and written when available.
-
-## What Immich Tagger does
-
-Immich Tagger is designed for photo libraries stored on a server, especially Unraid-hosted Immich external libraries.
-
-It can:
-
-- scan one folder or multiple folders of photos;
-- optionally include subfolders;
-- run a dry-run preview before changing files;
-- generate AI descriptions/captions;
-- generate AI tags/keywords;
-- write Immich-friendly `.xmp` sidecars next to the original image files;
-- write internal JSON audit sidecars for troubleshooting and review;
-- preserve existing/protected descriptions unless overwrite behavior is enabled;
-- use a primary Ollama model and optional fallback model/server;
-- show progress, retry/fallback counters, summaries, and logs.
-
-## What Immich Tagger does not do
-
-Immich Tagger is not a replacement for Immich.
-
-It does not:
-
-- store photos;
-- replace the Immich database;
-- directly edit original image files;
-- require photos to be uploaded to a cloud service;
-- bundle Ollama or AI models inside the app container;
-- recursively repair media-library permissions;
-- automatically expose itself safely to the public internet.
-
-## How the metadata flow works
-
-1. Immich Tagger reads an image from the selected folder.
-2. It sends image content to an Ollama vision model.
-3. The model returns structured metadata such as description and tags.
-4. Immich Tagger writes:
-   - an XMP sidecar beside the image for Immich;
-   - a JSON sidecar under the `.photoai` audit area for review/debugging.
-5. Immich then needs to discover/sync the sidecar metadata.
-
-## Files created
-
-For an image like:
-
-```text
-/photos/Family/2024/Picnic/IMG_1234.jpg
-```
-
-Immich Tagger may create an XMP sidecar like:
-
-```text
-/photos/Family/2024/Picnic/IMG_1234.jpg.xmp
-```
-
-It also creates internal audit/log output under `.photoai`, for example:
-
-```text
-/photos/Family/2024/Picnic/.photoai/
-```
-
-The scanner must never scan its own `.photoai` folders. It also excludes `.Recycle.Bin` and `@eaDir` folders.
-
-## Tags versus descriptions
-
-Tags are the primary value of Immich Tagger.
-
-Tags help with:
-
-- search;
-- grouping similar photos;
-- finding objects, locations, animals, activities, vehicles, scenes, and events;
-- improving the usefulness of large Immich libraries.
-
-Descriptions/captions are also useful, but the main product direction is now tag-centered.
-
-## Recommended model approach
-
-Known-good high-quality path from prior testing:
-
-```text
-Model: qwen2.5vl:7b
-Max Image Size: 0 / original full resolution
-Hardware: Windows RTX 5080-class GPU
-```
-
-Known Unraid compatibility/fallback path:
-
-```text
-Model: minicpm-v:latest
-Max Image Size: 0 / original full resolution
-Hardware: Unraid GPU path
-```
-
-Important note:
-
-```text
-Avoid qwen2.5vl:3b-q4_K_M unless explicitly testing/diagnosing it.
-```
-
-That tag previously showed Ollama runner instability and should not be used as the normal safe/default option.
-
-## Main settings
-
-### Photo folder / source directory
-
-The folder to scan.
-
-In Docker/Unraid, the container should see the photo library at:
-
-```text
-/photos
-```
-
-Example host-to-container mapping:
-
-```text
-Host path:      /mnt/user/photos
-Container path: /photos
-```
-
-Then a real folder might be entered in the app as:
-
-```text
-/photos/Family/2024/Picnic
-```
-
-### Config directory
-
-Persistent app configuration should live at:
-
-```text
-/config
-```
-
-Recommended Unraid host mapping:
-
-```text
-Host path:      /mnt/user/appdata/immich-tagger
-Container path: /config
-```
-
-When settings are changed from the web UI, Immich Tagger writes them to:
-
-```text
-/config/immich-tagger-settings.json
-```
-
-The Unraid template/environment variables are the first-run defaults. Saved web UI settings are then reloaded from `/config` after container restarts.
-
-### Logs
-
-Docker/server logs should persist under:
-
-```text
-/config/logs
-```
-
-Run-specific scan/anomaly logs may also be created in the selected photo tree's `.photoai` folder depending on the scanner path.
-
-### Health check
-
-The Docker image exposes a lightweight health endpoint:
-
-```text
-/healthz
-```
-
-Docker and compose deployments use this endpoint to report whether the web server is responding.
-
-### Recursive / Subfolders
-
-When enabled, Immich Tagger scans subfolders under the selected folder.
-
-Recommended default:
-
-```text
-enabled
-```
-
-### Dry Run
-
-Dry Run previews what would happen without calling Ollama and without writing sidecars.
-
-Recommended default:
-
-```text
-enabled
-```
-
-Use Dry Run before a first scan of any new production folder.
-
-### Scan Existing / Force
-
-Controls whether images with existing Immich Tagger/PhotoAI JSON sidecars can be considered for reprocessing.
-
-Typical behavior:
-
-- enabled: existing JSON does not automatically block reprocessing;
-- disabled: existing JSON means the image is skipped.
-
-### Overwrite XMP+ / Overwrite Sidecars
-
-Controls whether existing JSON and XMP sidecars are regenerated.
-
-For production use, be careful with overwrite behavior. If existing sidecars contain protected descriptions or manually curated metadata, test on a small folder first.
-
-### Add Tags
-
-The Docker/server direction treats tags as always-on by default because tags are the primary product value.
-
-### Write JSON
-
-Writes internal JSON sidecars for review/debugging.
-
-Recommended default:
-
-```text
-enabled
-```
-
-### Write XMP
-
-Writes Immich-compatible XMP sidecars next to images.
-
-Recommended default:
-
-```text
-enabled
-```
-
-### Limit
-
-Optional maximum number of non-skipped images to process.
-
-Use this for testing:
-
-```text
-5
-10
-25
-```
-
-Use `0` or blank for no limit.
-
-### Primary Ollama URL
-
-The main Ollama server address.
-
-Examples:
-
-```text
-http://192.168.1.8:11434
-http://host.docker.internal:11434
-http://192.168.1.50:11434
-```
-
-The app container does not need to run on the same machine as Ollama. It only needs network access to the Ollama HTTP API.
-
-### Primary Model
-
-The main vision model tag.
-
-Recommended high-quality model:
-
-```text
-qwen2.5vl:7b
-```
-
-### Max Image Size
-
-Controls image resize before sending to the model.
-
-Important value:
-
-```text
-0 = original/full resolution
-```
-
-Other examples:
-
-```text
-1440 = resize longest edge to 1440px
-2048 = resize longest edge to 2048px
-```
-
-### Fallback enabled
-
-If enabled, Immich Tagger may try a fallback Ollama endpoint/model after primary failures.
-
-Useful when:
-
-- the main model/server is unavailable;
-- a transient Ollama request fails;
-- an Unraid compatibility model is available.
-
-### Fallback Ollama URL
-
-Example:
-
-```text
-http://192.168.1.8:11434
-```
-
-### Fallback Model
-
-Known useful fallback:
-
-```text
-minicpm-v:latest
-```
-
-## Docker/Unraid settings
-
-Recommended Unraid template values:
-
-```text
-Container name: Immich-Tagger
-Repository: ghcr.io/rzrnaz/immich-tagger:latest
-Web UI port: 8080
-/photos: /mnt/user/photos or the relevant Immich external-library share
-/config: /mnt/user/appdata/immich-tagger
-PUID: 99
-PGID: 100
-UMASK: 000
-TZ: America/Phoenix or your local timezone
-```
-
-For this user's Unraid media policy, sidecars should be written with normal container media ownership/permissions using:
-
-```text
-PUID=99
-PGID=100
-UMASK=000
-```
-
-Do not use Immich Tagger as a general permission-repair tool.
-
-It is normal not to see an Immich Tagger container on Unraid until you install the Unraid template or run a compose/container instance. Development smoke-test containers are temporary and should be removed after verification. The intended permanent image name is:
-
-```text
-ghcr.io/rzrnaz/immich-tagger:latest
-```
-
-## Example: safely process one Unraid subdirectory
-
-Assume the host has a photo share path:
-
-```text
-/mnt/user/photos/Family/2024/Picnic
-```
-
-And the Docker template maps:
-
-```text
-Host path:      /mnt/user/photos
-Container path: /photos
-```
-
-Inside Immich Tagger, the folder is:
-
-```text
-/photos/Family/2024/Picnic
-```
-
-Recommended first run:
-
-1. Open the Immich Tagger web UI.
-2. Enter source folder:
-   ```text
-   /photos/Family/2024/Picnic
-   ```
-3. Enable:
-   ```text
-   Dry Run
-   Recursive if desired
-   Write JSON
-   Write XMP
-   Add Tags / tag output
-   ```
-4. Set a small limit if testing:
-   ```text
-   10
-   ```
-5. Run Dry Run.
-6. Review the would-process count.
-7. Disable Dry Run.
-8. Keep the limit small for the first live test.
-9. Run Scan.
-10. Confirm sidecars were created next to images.
-11. Review logs and JSON diagnostics.
-12. If satisfied, increase/remove the limit and run the remaining folder.
-
-## Optional: back up one subdirectory before testing
-
-If you want a simple pre-run safety copy on Unraid, use a separate backup location and preserve attributes.
-
-Example concept:
-
-```bash
-mkdir -p /mnt/user/photo-test-backups/Family-2024-Picnic
-rsync -a --info=progress2 \
-  /mnt/user/photos/Family/2024/Picnic/ \
-  /mnt/user/photo-test-backups/Family-2024-Picnic/
-```
-
-Use this only for targeted first-run safety. For full ongoing backups, rely on the server's normal backup plan rather than making Immich Tagger responsible for backups.
-
-## Immich sidecar Discover and Sync
-
-For Immich external libraries, new sidecars beside already-known assets usually need Immich sidecar jobs.
-
-Recommended sequence after a live Immich Tagger run:
-
-1. Run Immich sidecar **Discover** so Immich associates newly created `.xmp` files.
-2. After Discover finishes, run Immich sidecar **Sync** so Immich re-reads known/updated sidecars.
-
-Immich rejects overlapping sidecar jobs, so Discover and Sync should not be started at the same time.
+Welcome to the Immich Tagger! This tool helps you automatically tag your photos with AI-powered descriptions and keywords using Vision Language Models (VLMs) that work with Immich.
+
+## Overview
+
+Immich Tagger scans your photo library, sends images to an Ollama vision model, and creates Immich-compatible sidecars. It supports both a Windows GUI version and a Linux Docker version for Unraid environments.
+
+The tool creates both JSON diagnostic files (for troubleshooting) and XMP sidecars (for Immich integration) next to your photos.
+
+## What Gets Created
+
+### XMP Sidecar Files
+- File extension: `.jpg.xmp` 
+- Contains AI-generated tags/keywords for Immich
+- Follows Immich's supported format
+
+### JSON Sidecar Files  
+- File extension: `.photoai.json`
+- Contains detailed AI responses for troubleshooting
+- Option to disable for production use
+
+## Getting Started
+
+### Windows GUI Version
+
+1. **Prerequisites**
+   - Windows 10+  
+   - .NET 8.0 runtime
+   - Running Ollama server on the same network
+
+2. **Usage**
+   - Launch `PhotoAIApp.Gui.exe`
+   - Configure the settings:
+     - Set the photo library root path
+     - Configure Ollama server URL
+     - Select the model to use
+   - Choose a folder to scan
+   - Start a Dry Run to preview what would be processed
+   - Start a Live Scan to actually process and tag photos
+
+### Docker/Unraid Version
+
+1. **Prerequisites**
+   - Running Ollama server accessible from Docker container
+   - Photos in an accessible filesystem path
+   - Docker-compatible environment (like Unraid)
+
+2. **Configuration**
+   - Map photo library to `/photos`
+   - Map config directory to `/config`
+   - Configure environment variables for Ollama settings
+   - Access the web UI at `http://<host>:8080`
+
+## Settings Reference
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Photo Root | Directory where photos are located | `/photos` |
+| Config Root | Directory for app config/logs | `/config` |
+| Log Root | Directory for log files | `/config/logs` |
+| Primary Ollama URL | URL of the primary Ollama server | `http://192.168.1.8:11434` |
+| Primary Model | Name of the primary vision model | `qwen2.5vl:7b` |
+| Max Image Size | Resize images before sending to model (0 = no resize) | `0` |
+| Fallback Enabled | Enable fallback model if primary fails | `true` |
+| Fallback Ollama URL | URL of the fallback Ollama server | `http://192.168.1.8:11434` |
+| Fallback Model | Name of the fallback vision model | `minicpm-v:latest` |
+| Dry Run Default | Default to dry-run mode for safety | `true` |
+| Write JSON | Enable JSON sidecar creation | `false` |
+| Write XMP | Enable XMP sidecar creation | `true` |
+| Add Tags | Enable AI-generated tags in XMP | `true` |
+
+## Safety Features
+
+### Dry Runs
+Before processing photos, you can perform a dry run to see exactly what would be tagged without modifying files.
+
+### Fallback Models
+If the primary model fails, the tool will automatically attempt a fallback model that provides similar (but potentially lower quality) results.
+
+### Overwrite Protection  
+By default, existing sidecars are left unchanged. You can enable overwrite mode to regenerate all sidecars.
 
 ## Troubleshooting
 
-### The app cannot reach Ollama
+### Common Issues
 
-Check:
+1. **Connection to Ollama Failed**
+   - Ensure the Ollama server is running
+   - Verify the URL in settings is correct
+   - Confirm network connectivity between applications
 
-- Ollama server is running.
-- URL includes `http://` and port `11434`.
-- Docker container can reach that IP/host.
-- Firewall allows access.
-- Model exists on the Ollama server.
+2. **Missing Model**
+   - Pull the required model with `ollama pull qwen2.5vl:7b`
+   - Check model name is exactly correct in settings
 
-### Model is slow
+3. **Permissions Issues**
+   - Ensure the tool has read/write privileges to photo library
+   - Check Unraid media permissions match the container user/group settings
 
-Try:
+## Example Workflow  
 
-- smaller folder;
-- a test limit such as 10 images;
-- `Max Image Size = 1440` instead of full-res;
-- a smaller/fallback model if quality tradeoff is acceptable.
+Here's a typical workflow when using Immich with the Tagger:
 
-### Sidecars are not visible in Immich
+1. **Scan Photos**
+   - Launch Immich Tagger and select a photo subfolder
+   - Run a Dry Run to see what would be processed
+   
+2. **Tag Photos**
+   - Run a Live Scan to generate sidecars
+   - Check that `.jpg.xmp` files were created alongside photos
 
-Check:
+3. **Import into Immich**
+   - In Immich, run a Discover scan to detect the new sidecars
+   - Run Sync to import the tags into your photo library
 
-- `.jpg.xmp` files exist next to photos;
-- Immich external library points to the same files;
-- Immich sidecar Discover has run;
-- Immich sidecar Sync has run after Discover;
-- no sidecar job is already running/stuck.
+## Support
 
-### Permission issues
-
-On Unraid, check container values:
-
-```text
-PUID=99
-PGID=100
-UMASK=000
-```
-
-Do not recursively chmod appdata or media libraries from inside Immich Tagger. Use Unraid-safe maintenance practices if permissions need separate repair.
-
-### A few files fail
-
-A very small number of failures across a large library can be acceptable. The earlier full-library run had only 3-4 total files that could not be processed out of about 27,000, which is not worth delaying Docker/server work.
+For additional help, visit the GitHub repository at: https://github.com/rzrnaz/PhotoAIApp

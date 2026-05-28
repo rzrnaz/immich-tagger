@@ -95,19 +95,7 @@ public sealed class PhotoAiScanner
             }, cancellationToken);
         }
 
-        SearchOption searchOption = options.Recursive
-            ? SearchOption.AllDirectories
-            : SearchOption.TopDirectoryOnly;
-
-        List<string> imagePaths = Directory
-            .EnumerateFiles(rootPath, "*.*", searchOption)
-            .Where(path => !IsInExcludedScanDirectory(path, rootPath))
-            .Where(path => PhotoAiDefaults.SupportedExtensions.Contains(
-                Path.GetExtension(path),
-                StringComparer.OrdinalIgnoreCase
-            ))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        List<string> imagePaths = GetSupportedImagePaths(rootPath, options.Recursive).ToList();
 
         summary.ImagesFound = imagePaths.Count;
         Report(
@@ -195,7 +183,7 @@ public sealed class PhotoAiScanner
             bool jsonExists = File.Exists(photoAiSidecarPath);
             bool xmpExists = File.Exists(xmpPath);
 
-            if (jsonExists && !options.Force)
+            if (options.WriteJson && jsonExists && !options.Force)
             {
                 summary.Skipped++;
                 Report(
@@ -439,9 +427,7 @@ public sealed class PhotoAiScanner
                 summary.ExistingXmpSidecars++;
             }
 
-            bool wouldAnalyze = options.Force || !hasPhotoAiSidecar;
-
-            if (!wouldAnalyze)
+            if (options.WriteJson && hasPhotoAiSidecar && !options.Force)
             {
                 summary.Skipped++;
                 Report(
@@ -1806,6 +1792,92 @@ Other rules:
 
     public static string GetImmichXmpSidecarPath(string imagePath) => imagePath + ".xmp";
 
+    public static IReadOnlyList<string> GetSupportedImagePaths(string rootPath, bool recursive)
+    {
+        string normalizedRoot = NormalizeDirectoryPath(rootPath);
+        IEnumerable<string> paths = recursive
+            ? EnumerateFilesRecursivelySafely(normalizedRoot)
+            : EnumerateTopLevelFilesSafely(normalizedRoot);
+
+        return paths
+            .Where(path => !IsInExcludedScanDirectory(path, normalizedRoot))
+            .Where(path => PhotoAiDefaults.SupportedExtensions.Contains(
+                Path.GetExtension(path),
+                StringComparer.OrdinalIgnoreCase))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IEnumerable<string> EnumerateTopLevelFilesSafely(string rootPath)
+    {
+        IEnumerable<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(rootPath, "*.*", SearchOption.TopDirectoryOnly).ToList();
+        }
+        catch (Exception ex) when (IsRecoverableEnumerationException(ex))
+        {
+            yield break;
+        }
+
+        foreach (string file in files)
+        {
+            yield return file;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateFilesRecursivelySafely(string rootPath)
+    {
+        var pending = new Stack<string>();
+        pending.Push(rootPath);
+
+        while (pending.Count > 0)
+        {
+            string currentDirectory = pending.Pop();
+            if (!string.Equals(NormalizeDirectoryPath(currentDirectory), NormalizeDirectoryPath(rootPath), StringComparison.OrdinalIgnoreCase) &&
+                IsExcludedScanDirectoryPath(currentDirectory, rootPath))
+            {
+                continue;
+            }
+
+            IEnumerable<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(currentDirectory, "*.*", SearchOption.TopDirectoryOnly).ToList();
+            }
+            catch (Exception ex) when (IsRecoverableEnumerationException(ex))
+            {
+                continue;
+            }
+
+            foreach (string file in files)
+            {
+                yield return file;
+            }
+
+            IEnumerable<string> directories;
+            try
+            {
+                directories = Directory.EnumerateDirectories(currentDirectory, "*", SearchOption.TopDirectoryOnly).ToList();
+            }
+            catch (Exception ex) when (IsRecoverableEnumerationException(ex))
+            {
+                continue;
+            }
+
+            foreach (string directory in directories.OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!IsExcludedScanDirectoryPath(directory, rootPath))
+                {
+                    pending.Push(directory);
+                }
+            }
+        }
+    }
+
+    private static bool IsRecoverableEnumerationException(Exception ex) =>
+        ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException or PathTooLongException;
+
     public static bool IsInExcludedScanDirectory(string candidatePath, string rootPath)
     {
         string fullCandidate = NormalizeDirectoryOrFilePath(candidatePath);
@@ -1826,11 +1898,37 @@ Other rules:
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
             StringSplitOptions.RemoveEmptyEntries);
 
-        return parts.Any(part =>
-            string.Equals(part, ".photoai", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(part, ".Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(part, "@eaDir", StringComparison.OrdinalIgnoreCase));
+        return parts.Any(IsExcludedScanDirectoryName);
     }
+
+    public static bool IsExcludedScanDirectoryPath(string candidateDirectoryPath, string rootPath)
+    {
+        string fullCandidate = NormalizeDirectoryPath(candidateDirectoryPath);
+        string fullRoot = NormalizeDirectoryPath(rootPath);
+
+        if (string.Equals(fullCandidate, fullRoot, StringComparison.OrdinalIgnoreCase) || !IsPathUnderRoot(fullCandidate, fullRoot))
+        {
+            return false;
+        }
+
+        string relativePath = Path.GetRelativePath(fullRoot, fullCandidate);
+        if (string.IsNullOrWhiteSpace(relativePath) || relativePath == ".")
+        {
+            return false;
+        }
+
+        string[] parts = relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        return parts.Any(IsExcludedScanDirectoryName);
+    }
+
+    private static bool IsExcludedScanDirectoryName(string directoryName) =>
+        string.Equals(directoryName, ".photoai", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(directoryName, ".Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(directoryName, "@eaDir", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(directoryName, "thumbs", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsPathUnderRoot(string candidatePath, string rootPath)
     {

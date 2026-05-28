@@ -34,6 +34,7 @@ public sealed class MainForm : Form
     private readonly CheckBox _recursiveCheckBox = new() { Text = "Subfolders", Checked = true, AutoSize = true };
     private readonly CheckBox _forceCheckBox = new() { Text = "Scan Existing", Checked = true, AutoSize = true };
     private readonly CheckBox _overwriteSidecarsCheckBox = new() { Text = "Overwrite XMP+", Checked = true, AutoSize = true };
+    private readonly CheckBox _modelLogCheckBox = new() { Text = "Model Log", Checked = false, AutoSize = true };
     private readonly CheckBox _dryRunCheckBox = new() { Text = "Dry Run", Checked = true, AutoSize = true };
     private readonly CheckBox _syncImmichCheckBox = new() { Text = "Sync Immich", Checked = false, AutoSize = true };
     private readonly Button _browseSelectedFolderButton = new() { Text = "Browse...", Width = 120, Height = 40 };
@@ -174,8 +175,9 @@ public sealed class MainForm : Form
         _toolTip.SetToolTip(_profileComboBox, "Preset AI model/settings. High Quality uses Qwen 7B full resolution; Balanced uses Qwen 7B at 1440px.");
         _toolTip.SetToolTip(_advancedSettingsButton, "Open primary/fallback Ollama server, model, and Max Image Size settings.");
         _toolTip.SetToolTip(_recursiveCheckBox, "Include images in subfolders. Internal .photoai log folders are always ignored.");
-        _toolTip.SetToolTip(_forceCheckBox, "When checked, images with an existing .photoai.json can be considered for re-scan. When unchecked, existing PhotoAI JSON means skip the image.");
-        _toolTip.SetToolTip(_overwriteSidecarsCheckBox, "When checked, existing .photoai.json and .jpg.xmp sidecars are regenerated together. When unchecked, existing sidecars are protected and no-op images skip the LLM.");
+        _toolTip.SetToolTip(_forceCheckBox, "When checked, images with existing sidecars can be considered for re-scan. When unchecked, images with all requested output sidecars already present skip the LLM.");
+        _toolTip.SetToolTip(_overwriteSidecarsCheckBox, "When checked, existing .jpg.xmp sidecars and enabled .photoai.json model logs are regenerated. When unchecked, existing requested sidecars are protected.");
+        _toolTip.SetToolTip(_modelLogCheckBox, "Keep optional .photoai.json model diagnostics next to each image. Leave unchecked for normal Immich XMP-only output; the run/anomaly log is still kept.");
         _toolTip.SetToolTip(_dryRunCheckBox, "Preview what would be scanned/written without calling Ollama or changing files.");
         _toolTip.SetToolTip(_syncImmichCheckBox, "After a successful live scan, ask Immich to Discover new sidecar metadata and then Sync existing sidecar metadata.");
         _toolTip.SetToolTip(_limitNumeric, "Optional maximum number of images to process. 0 means no limit.");
@@ -418,6 +420,7 @@ public sealed class MainForm : Form
 
         ConfigureOptionCheckBox(_dryRunCheckBox, 230);
         ConfigureOptionCheckBox(_syncImmichCheckBox, 250);
+        ConfigureOptionCheckBox(_modelLogCheckBox, 230);
 
         var limitLabel = new Label
         {
@@ -435,6 +438,7 @@ public sealed class MainForm : Form
 
         row2.Controls.Add(_dryRunCheckBox);
         row2.Controls.Add(_syncImmichCheckBox);
+        row2.Controls.Add(_modelLogCheckBox);
         row2.Controls.Add(limitLabel);
         row2.Controls.Add(_limitNumeric);
 
@@ -499,8 +503,9 @@ public sealed class MainForm : Form
         MessageBox.Show(this,
             "Folder source: defaults to P:\\. When the path exists, the folder tree loads automatically.\r\n\r\n" +
             "Selected folders: select every folder to include and unselect folders to exclude. Click the expand control on a folder to show subfolders; subfolders can also be selected, unselected, and expanded. If no tree is loaded, the typed folder source is scanned directly. Enable Subfolders to recurse within each selected folder. Internal .photoai folders are always ignored.\r\n\r\n" +
-            "Scan Existing: re-scan images with existing PhotoAI JSON.\r\n\r\n" +
-            "Overwrite XMP+: regenerate JSON and XMP together.\r\n\r\n" +
+            "Scan Existing: re-scan images with existing requested sidecars.\r\n\r\n" +
+            "Overwrite XMP+: regenerate existing XMP sidecars and enabled model logs.\r\n\r\n" +
+            "Model Log: keep optional .photoai.json diagnostics next to each image. Leave unchecked for normal Immich XMP-only output; the run/anomaly log is still kept.\r\n\r\n" +
             "Dry Run: preview without changing files or calling Ollama.\r\n\r\n" +
             "Sync Immich: after a live scan, trigger Immich Sidecar Metadata Discover and then Sync. This is skipped for dry runs.\r\n\r\n" +
             "The live log shows the 10 most recent messages; Open log shows the full run log after a live scan.",
@@ -1242,17 +1247,10 @@ public sealed class MainForm : Form
 
     private static int CountCandidateImages(string folderPath, bool recursive, int? limit)
     {
-        SearchOption searchOption = recursive
-            ? SearchOption.AllDirectories
-            : SearchOption.TopDirectoryOnly;
-
         int count = 0;
-        foreach (string path in Directory.EnumerateFiles(folderPath, "*.*", searchOption)
-            .Where(path => !PhotoAiScanner.IsInExcludedScanDirectory(path, folderPath))
-            .Where(path => PhotoAiDefaults.SupportedExtensions.Contains(
-                Path.GetExtension(path),
-                StringComparer.OrdinalIgnoreCase)))
+        foreach (string path in PhotoAiScanner.GetSupportedImagePaths(folderPath, recursive))
         {
+            _ = path;
             count++;
             if (limit is > 0 && count >= limit.Value)
             {
@@ -1349,7 +1347,7 @@ public sealed class MainForm : Form
                         SafetyRootPath = null,
                         Recursive = _recursiveCheckBox.Checked,
                         Force = _forceCheckBox.Checked,
-                        WriteJson = true,
+                        WriteJson = _modelLogCheckBox.Checked,
                         WriteXmp = true,
                         OverwriteJson = _overwriteSidecarsCheckBox.Checked,
                         OverwriteXmp = _overwriteSidecarsCheckBox.Checked,

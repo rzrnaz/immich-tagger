@@ -55,7 +55,7 @@ public sealed record PhotoAiModelProfile
         new PhotoAiModelProfile
         {
             ProfileId = PhotoAiModelProfileId.Compatibility,
-            DisplayName = "Compatibility - Unraid MiniCPM-V",
+            DisplayName = "Compatibility - Unraid MiniCPM-V full-res",
             OllamaBaseUrl = PhotoAiDefaults.UnraidOllamaBaseUrl,
             Model = PhotoAiDefaults.UnraidModel,
             MaxImageDimensionPixels = 0,

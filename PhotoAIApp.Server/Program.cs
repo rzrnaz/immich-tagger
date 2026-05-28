@@ -334,7 +334,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         <div class="switches">
           <label><input id="recursive" type="checkbox" {{Checked(settings.Recursive)}}>Subfolders</label>
           <label><input id="force" type="checkbox" {{Checked(settings.Force)}}>Scan existing PhotoAI sidecars</label>
-          <label><input id="writeJson" type="checkbox" {{Checked(settings.WriteJson)}}>Write JSON diagnostics</label>
+          <label><input id="writeJson" type="checkbox" {{Checked(settings.WriteJson)}}>Model Log (.photoai.json diagnostics)</label>
           <label><input id="writeXmp" type="checkbox" {{Checked(settings.WriteXmp)}}>Write Immich XMP sidecars</label>
           <label><input id="addTags" type="checkbox" {{Checked(settings.AddTags)}}>Add tags</label>
           <label><input id="dryRunDefault" type="checkbox" {{Checked(settings.DryRunDefault)}}>Dry run by default</label>
