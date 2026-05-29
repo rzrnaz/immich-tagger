@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
     <ProjectReference Include="..\PhotoAIApp.Core\PhotoAIApp.Core.csproj" />
+    <Content Include="..\PhotoAIApp.Gui\Assets\PhotoAIApp.ico" Link="Assets\PhotoAIApp.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>

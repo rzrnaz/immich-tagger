@@ -14,6 +14,13 @@ builder.Services.AddSingleton<ScanJobService>();
 var app = builder.Build();
 
 app.MapGet("/", (ImmichTaggerSettings settings, ScanJobService jobs) => Results.Content(RenderHome(settings, jobs.Status), "text/html"));
+app.MapGet("/favicon.ico", () =>
+{
+    string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "PhotoAIApp.ico");
+    return System.IO.File.Exists(iconPath)
+        ? Results.File(iconPath, "image/x-icon")
+        : Results.NotFound();
+});
 app.MapGet("/healthz", (ScanJobService jobs) => Results.Ok(new
 {
     status = "ok",
@@ -66,6 +73,23 @@ app.MapGet("/api/log", (ImmichTaggerSettings settings, string path) =>
     }
 
     return Results.File(fullPath, "text/plain");
+});
+
+app.MapGet("/api/models", async (string baseUrl, string? target) =>
+{
+    string normalizedBaseUrl = NormalizeOllamaBaseUrl(baseUrl);
+    bool isFallback = string.Equals(target, "fallback", StringComparison.OrdinalIgnoreCase);
+
+    try
+    {
+        var scanner = new PhotoAiScanner();
+        string[] models = NormalizeModelListForTarget(await scanner.GetAvailableOllamaModelsAsync(normalizedBaseUrl), isFallback);
+        return Results.Ok(new OllamaModelsResponse(normalizedBaseUrl, models));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = $"Unable to query {normalizedBaseUrl}: {ex.Message}" });
+    }
 });
 
 app.MapPost("/api/dry-run", (ImmichTaggerSettings settings, ScanJobService jobs, ScanStartRequest request) =>
@@ -125,7 +149,7 @@ static void ApplySettingsUpdate(ImmichTaggerSettings settings, ImmichTaggerSetti
     settings.PhotoRoot = CleanPath(request.PhotoRoot, settings.PhotoRoot);
     settings.ConfigRoot = CleanPath(request.ConfigRoot, settings.ConfigRoot);
     settings.LogRoot = CleanPath(request.LogRoot, settings.LogRoot);
-    settings.DefaultFolderPath = CleanPath(request.DefaultFolderPath, settings.DefaultFolderPath);
+    settings.DefaultFolderPath = settings.PhotoRoot;
     settings.Recursive = request.Recursive;
     settings.Force = request.Force;
     settings.WriteJson = request.WriteJson;
@@ -239,9 +263,29 @@ static string[] GetRequestedFolders(ImmichTaggerSettings settings, ScanStartRequ
 {
     IEnumerable<string?> requestedFolders = request.FolderPaths is { Count: > 0 }
         ? request.FolderPaths
-        : [string.IsNullOrWhiteSpace(request.FolderPath) ? settings.DefaultFolderPath : request.FolderPath];
+        : [string.IsNullOrWhiteSpace(request.FolderPath) ? settings.PhotoRoot : request.FolderPath];
 
     return PhotoAiFolderSelection.NormalizeAndValidateSelectedFolders(requestedFolders, settings.PhotoRoot);
+}
+
+static string NormalizeOllamaBaseUrl(string? baseUrl)
+{
+    return PhotoAiModelProfile.BuildBaseUrl(baseUrl ?? string.Empty, 11434);
+}
+
+static string[] NormalizeModelListForTarget(IEnumerable<string> discoveredModels, bool isFallback)
+{
+    IEnumerable<string> models = discoveredModels.Where(model => !string.IsNullOrWhiteSpace(model));
+    if (!isFallback)
+    {
+        models = models.Concat(PhotoAiDefaults.PreferredPrimaryModels);
+    }
+
+    return models
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(model => Array.FindIndex(PhotoAiDefaults.PreferredPrimaryModels, preferred => string.Equals(preferred, model, StringComparison.OrdinalIgnoreCase)) is int index && index >= 0 ? index : int.MaxValue)
+        .ThenBy(model => model, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
 }
 
 static string GetSettingsFilePath(ImmichTaggerSettings settings)
@@ -313,11 +357,12 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 {
     string Encode(string? value) => HtmlEncoder.Default.Encode(value ?? string.Empty);
     string Checked(bool value) => value ? "checked" : string.Empty;
-    string[] explicitSelectedFolders = status.SelectedFolderPaths.Count > 0
+    string[] explicitSelectedFolders = status.IsRunning && status.SelectedFolderPaths.Count > 0
         ? status.SelectedFolderPaths.ToArray()
         : [];
-    string currentFolder = explicitSelectedFolders.FirstOrDefault()
-        ?? (string.IsNullOrWhiteSpace(status.FolderPath) ? settings.DefaultFolderPath : status.FolderPath);
+    string currentFolder = status.IsRunning
+        ? explicitSelectedFolders.FirstOrDefault() ?? (string.IsNullOrWhiteSpace(status.FolderPath) ? settings.PhotoRoot : status.FolderPath)
+        : settings.PhotoRoot;
     string folder = Encode(currentFolder);
     string message = Encode(status.Message);
     string error = Encode(status.Error ?? string.Empty);
@@ -347,6 +392,15 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         ? $"Custom | {currentProfile.Summary}"
         : currentProfile.Summary;
     string currentProfileIdText = currentProfileId.ToString();
+    string fallbackPresetId = string.Equals(currentProfile.FallbackOllamaBaseUrl, PhotoAiDefaults.UnraidOllamaBaseUrl, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(currentProfile.FallbackModel, PhotoAiDefaults.QwenPcModel, StringComparison.OrdinalIgnoreCase)
+        && currentProfile.FallbackMaxImageDimensionPixels == PhotoAiDefaults.QwenMaxImageDimensionPixels
+            ? "Balanced"
+            : string.Equals(currentProfile.FallbackOllamaBaseUrl, PhotoAiDefaults.UnraidOllamaBaseUrl, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(currentProfile.FallbackModel, PhotoAiDefaults.UnraidModel, StringComparison.OrdinalIgnoreCase)
+                && currentProfile.FallbackMaxImageDimensionPixels == PhotoAiDefaults.UnraidMaxImageDimensionPixels
+                    ? "Compatibility"
+                    : "Custom";
     string profilePresetsJson = JsonSerializer.Serialize(PhotoAiModelProfile.Presets.Select(profile => new
     {
         id = profile.ProfileId.ToString(),
@@ -360,6 +414,27 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         fallbackModel = profile.FallbackModel,
         fallbackMaxImageSize = profile.FallbackMaxImageDimensionPixels
     }));
+    string fallbackPresetsJson = JsonSerializer.Serialize(new[]
+    {
+        new
+        {
+            id = "Balanced",
+            displayName = "Balanced - Unraid Qwen 7B 1440px",
+            summary = "Fallback target: 192.168.1.8:11434 | Model: qwen2.5vl:7b | Max Image Size: 1440px",
+            fallbackOllamaUrl = PhotoAiDefaults.UnraidOllamaBaseUrl,
+            fallbackModel = PhotoAiDefaults.QwenPcModel,
+            fallbackMaxImageSize = PhotoAiDefaults.QwenMaxImageDimensionPixels
+        },
+        new
+        {
+            id = "Compatibility",
+            displayName = "Compatibility - Unraid MiniCPM-V full-res",
+            summary = "Fallback target: 192.168.1.8:11434 | Model: minicpm-v:latest | Max Image Size: Original/full-res",
+            fallbackOllamaUrl = PhotoAiDefaults.UnraidOllamaBaseUrl,
+            fallbackModel = PhotoAiDefaults.UnraidModel,
+            fallbackMaxImageSize = PhotoAiDefaults.UnraidMaxImageDimensionPixels
+        }
+    });
 
     return $$"""
 <!doctype html>
@@ -368,6 +443,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Immich Tagger</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
   <style>
     body { font-family: system-ui, Segoe UI, sans-serif; background: #f7f1e8; color: #111; margin: 0; }
     main { max-width: 1240px; margin: 0 auto; padding: 32px; }
@@ -427,7 +503,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         <button class="secondary" type="button" onclick="browseFolders(document.getElementById('folderPath').value)">Browse this folder</button>
         <button class="secondary" type="button" onclick="browseFolders('{{Encode(settings.PhotoRoot)}}')">Browse /photos</button>
         <button class="secondary" type="button" onclick="addSelectedFolder(document.getElementById('folderPath').value)">Add current folder</button>
-        <button class="ghost" type="button" onclick="setCurrentFolderAsOnlySelection()">Use current folder only</button>
       </div>
       <p class="muted help-note">Pick one or more folders for this run. If nothing is selected, the typed folder still acts as the scan root.</p>
       <div id="folderBrowser" class="folder-list muted">Folder browser will appear here.</div>
@@ -439,14 +514,13 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         <div id="selectedFoldersList" class="muted"></div>
         <div class="scan-actions">
           <button class="secondary" type="button" onclick="addSelectedFolder(document.getElementById('folderPath').value)">Add typed path</button>
-          <button class="ghost" type="button" onclick="setCurrentFolderAsOnlySelection()">Use typed path only</button>
           <button class="secondary" type="button" onclick="clearSelectedFolders()">Clear selected folders</button>
         </div>
       </div>
       <label for="limit">Limit, optional</label>
       <input id="limit" type="number" min="0" value="{{settings.Limit?.ToString() ?? string.Empty}}" placeholder="0 = no limit">
       <div class="scan-actions">
-        <button {{scanButtonsDisabled}} onclick="startScan('/api/dry-run')">Dry Run</button>
+        <button class="pause" {{scanButtonsDisabled}} onclick="startScan('/api/dry-run')">Dry Run</button>
         <button {{scanButtonsDisabled}} onclick="startScan('/api/run')">Run Scan</button>
         <button class="pause" {{activeScanButtonsDisabled}} onclick="togglePauseResume()">{{(status.IsPaused ? "Resume" : "Pause")}}</button>
         <button class="stop" {{activeScanButtonsDisabled}} onclick="cancelScan()">Stop</button>
@@ -486,8 +560,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           <input id="configRoot" value="{{Encode(settings.ConfigRoot)}}">
           <label for="logRoot">Log root</label>
           <input id="logRoot" value="{{Encode(settings.LogRoot)}}">
-          <label for="defaultFolderPath">Default folder</label>
-          <input id="defaultFolderPath" value="{{Encode(settings.DefaultFolderPath)}}">
         </div>
         <div>
           <label for="profilePreset">Model preset</label>
@@ -502,13 +574,22 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           <label for="primaryOllamaUrl">Primary Ollama URL</label>
           <input id="primaryOllamaUrl" value="{{Encode(settings.PrimaryOllamaUrl)}}">
           <label for="primaryModel">Primary model</label>
-          <input id="primaryModel" value="{{Encode(settings.PrimaryModel)}}">
+          <select id="primaryModel"><option selected>{{Encode(settings.PrimaryModel)}}</option></select>
+          <p id="primaryModelStatus" class="muted settings-note">Change the primary Ollama URL, then pick from the refreshed model dropdown.</p>
           <label for="maxImageSize">Max Image Size</label>
           <input id="maxImageSize" type="number" min="0" value="{{settings.MaxImageSize}}">
+          <label for="fallbackPreset">Fallback preset</label>
+          <select id="fallbackPreset" onchange="applyFallbackPreset(this.value)">
+            <option value="Balanced"{{(fallbackPresetId == "Balanced" ? " selected" : string.Empty)}}>Balanced - Unraid Qwen 7B 1440px</option>
+            <option value="Compatibility"{{(fallbackPresetId == "Compatibility" ? " selected" : string.Empty)}}>Compatibility - Unraid MiniCPM-V full-res</option>
+            <option value="Custom"{{(fallbackPresetId == "Custom" ? " selected" : string.Empty)}}>Custom</option>
+          </select>
+          <p id="fallbackPresetSummary" class="muted settings-note">Balanced and Compatibility are the fallback-server shortcuts for the Unraid GPU path.</p>
           <label for="fallbackOllamaUrl">Fallback Ollama URL</label>
           <input id="fallbackOllamaUrl" value="{{Encode(settings.FallbackOllamaUrl)}}">
           <label for="fallbackModel">Fallback model</label>
-          <input id="fallbackModel" value="{{Encode(settings.FallbackModel)}}">
+          <select id="fallbackModel"><option selected>{{Encode(settings.FallbackModel)}}</option></select>
+          <p id="fallbackModelStatus" class="muted settings-note">When fallback is enabled, this dropdown reloads from the fallback Ollama URL.</p>
           <label for="fallbackMaxImageSize">Fallback Max Image Size</label>
           <input id="fallbackMaxImageSize" type="number" min="0" value="{{settings.FallbackMaxImageSize}}">
           <label for="immichBaseUrl">Immich Base URL</label>
@@ -538,7 +619,9 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
   <script>
     let selectedFolders = {{selectedFoldersJson}};
+    let currentFolderBrowserData = null;
     const profilePresets = {{profilePresetsJson}};
+    const fallbackPresets = {{fallbackPresetsJson}};
     const initialProfilePresetId = '{{currentProfileIdText}}';
 
     const numericValue = (id) => {
@@ -573,7 +656,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         : `${selectedFolders.length} selected folder${selectedFolders.length === 1 ? '' : 's'}`;
       summary.textContent = selectedFolders.length > 1
         ? `${selectedFolders.length} selected folders`
-        : (selectedFolders[0] || typedPath || '{{Encode(settings.DefaultFolderPath)}}');
+        : (selectedFolders[0] || typedPath || '{{Encode(settings.PhotoRoot)}}');
       if (selectedFolders.length === 0) {
         host.innerHTML = '<p>No folders selected yet. Use the folder browser or add the current folder.</p>';
         return;
@@ -583,10 +666,13 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         <div class="selected-folder-chip">
           <span>${escapeHtml(path)}</span>
           <span>
-            <button type="button" onclick="useOnlyFolder('${escapeJs(path)}')">Use only this folder</button>
             <button type="button" onclick="removeSelectedFolder(${index})">Remove</button>
           </span>
         </div>`).join('');
+
+      if (currentFolderBrowserData) {
+        renderFolderBrowser(currentFolderBrowserData);
+      }
     }
 
     function addSelectedFolder(path) {
@@ -609,22 +695,16 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       renderSelectedFolders();
     }
 
-    function useOnlyFolder(path) {
-      document.getElementById('folderPath').value = path;
-      selectedFolders = dedupeFolders([path]);
-      renderSelectedFolders();
-    }
-
-    function setCurrentFolderAsOnlySelection() {
-      useOnlyFolder(document.getElementById('folderPath').value);
-    }
-
     function onFolderPathChanged() {
       renderSelectedFolders();
     }
 
     function findPresetById(profileId) {
       return profilePresets.find(preset => preset.id === profileId) || null;
+    }
+
+    function findFallbackPresetById(profileId) {
+      return fallbackPresets.find(preset => preset.id === profileId) || null;
     }
 
     function determineProfilePreset() {
@@ -650,6 +730,8 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         presetSelect.value = 'Custom';
         summary.textContent = 'Custom | Target: edit the model fields below as needed.';
       }
+
+      refreshFallbackPresetSummary();
     }
 
     function applyProfilePreset(profileId) {
@@ -665,15 +747,140 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       }
 
       document.getElementById('primaryOllamaUrl').value = preset.primaryOllamaUrl;
-      document.getElementById('primaryModel').value = preset.primaryModel;
+      setSelectValue('primaryModel', preset.primaryModel);
       document.getElementById('maxImageSize').value = preset.maxImageSize;
       document.getElementById('fallbackEnabled').checked = preset.fallbackEnabled;
       document.getElementById('fallbackOllamaUrl').value = preset.fallbackOllamaUrl;
-      document.getElementById('fallbackModel').value = preset.fallbackModel;
+      setSelectValue('fallbackModel', preset.fallbackModel);
       document.getElementById('fallbackMaxImageSize').value = preset.fallbackMaxImageSize;
       document.getElementById('profileSummary').textContent = preset.summary;
       document.getElementById('profilePreset').value = preset.id;
+      updateFallbackControlState();
+      refreshFallbackPresetSummary();
+      scheduleModelRefresh('primary');
+      scheduleModelRefresh('fallback');
     }
+
+    function determineFallbackPreset() {
+      return fallbackPresets.find(preset =>
+        preset.fallbackOllamaUrl.trim().toLowerCase() === textValue('fallbackOllamaUrl').trim().toLowerCase()
+        && preset.fallbackModel.trim().toLowerCase() === textValue('fallbackModel').trim().toLowerCase()
+        && Number(preset.fallbackMaxImageSize) === Number(numericValue('fallbackMaxImageSize') ?? 0)
+      ) || null;
+    }
+
+    function refreshFallbackPresetSummary() {
+      const preset = determineFallbackPreset();
+      const presetSelect = document.getElementById('fallbackPreset');
+      const summary = document.getElementById('fallbackPresetSummary');
+      if (preset) {
+        presetSelect.value = preset.id;
+        summary.textContent = preset.summary;
+      } else {
+        presetSelect.value = 'Custom';
+        summary.textContent = 'Custom fallback | Target: edit fallback URL, model, and Max Image Size as needed.';
+      }
+    }
+
+    function applyFallbackPreset(profileId) {
+      if (profileId === 'Custom') {
+        refreshFallbackPresetSummary();
+        return;
+      }
+
+      const preset = findFallbackPresetById(profileId);
+      if (!preset) {
+        refreshFallbackPresetSummary();
+        return;
+      }
+
+      document.getElementById('fallbackEnabled').checked = true;
+      document.getElementById('fallbackOllamaUrl').value = preset.fallbackOllamaUrl;
+      setSelectValue('fallbackModel', preset.fallbackModel);
+      document.getElementById('fallbackMaxImageSize').value = preset.fallbackMaxImageSize;
+      updateFallbackControlState();
+      refreshFallbackPresetSummary();
+      refreshProfileSummary();
+      scheduleModelRefresh('fallback');
+    }
+
+    function setSelectOptions(selectId, models, preferredModel) {
+      const select = document.getElementById(selectId);
+      const currentValue = (select.value || '').trim();
+      const uniqueModels = [...new Set((models || []).map(model => (model || '').trim()).filter(Boolean))];
+      const fallbackValue = (preferredModel || '').trim() || currentValue;
+      if (fallbackValue && !uniqueModels.some(model => model.toLowerCase() === fallbackValue.toLowerCase())) {
+        uniqueModels.unshift(fallbackValue);
+      }
+
+      select.innerHTML = uniqueModels.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
+
+      const chosenValue = uniqueModels.find(model => model.toLowerCase() === currentValue.toLowerCase())
+        || uniqueModels.find(model => model.toLowerCase() === fallbackValue.toLowerCase())
+        || uniqueModels[0]
+        || '';
+
+      select.value = chosenValue;
+    }
+
+    function setSelectValue(selectId, value) {
+      setSelectOptions(selectId, [value], value);
+    }
+
+    function updateFallbackControlState() {
+      const enabled = checkboxValue('fallbackEnabled');
+      ['fallbackPreset', 'fallbackOllamaUrl', 'fallbackModel', 'fallbackMaxImageSize'].forEach(id => {
+        document.getElementById(id).disabled = !enabled;
+      });
+
+      const status = document.getElementById('fallbackModelStatus');
+      status.textContent = enabled
+        ? 'When fallback is enabled, this dropdown reloads from the fallback Ollama URL.'
+        : 'Fallback disabled.';
+    }
+
+    async function refreshModelsForTarget(target, showErrors = false) {
+      const isFallback = target === 'fallback';
+      if (isFallback && !checkboxValue('fallbackEnabled')) {
+        return;
+      }
+
+      const urlFieldId = isFallback ? 'fallbackOllamaUrl' : 'primaryOllamaUrl';
+      const modelFieldId = isFallback ? 'fallbackModel' : 'primaryModel';
+      const statusFieldId = isFallback ? 'fallbackModelStatus' : 'primaryModelStatus';
+      const defaultModel = isFallback
+        ? (findFallbackPresetById(document.getElementById('fallbackPreset').value)?.fallbackModel || textValue('fallbackModel'))
+        : textValue('primaryModel');
+      const baseUrl = textValue(urlFieldId).trim();
+      const status = document.getElementById(statusFieldId);
+      if (!baseUrl) {
+        status.textContent = `Enter a ${isFallback ? 'fallback' : 'primary'} Ollama URL to load models.`;
+        return;
+      }
+
+      status.textContent = `Loading models from ${baseUrl}...`;
+      const response = await fetch(`/api/models?baseUrl=${encodeURIComponent(baseUrl)}&target=${isFallback ? 'fallback' : 'primary'}`);
+      if (!response.ok) {
+        const message = await response.text();
+        status.textContent = `Unable to load models from ${baseUrl}.`;
+        if (showErrors) alert(message);
+        return;
+      }
+
+      const data = await response.json();
+      setSelectOptions(modelFieldId, data.models || [], defaultModel);
+      status.textContent = `${data.models.length} model(s) loaded from ${data.baseUrl}.`;
+      if (isFallback) {
+        refreshFallbackPresetSummary();
+      }
+      refreshProfileSummary();
+    }
+
+    function scheduleModelRefresh(target) {
+      clearTimeout(scheduleModelRefresh.timers[target]);
+      scheduleModelRefresh.timers[target] = setTimeout(() => refreshModelsForTarget(target, false), 250);
+    }
+    scheduleModelRefresh.timers = { primary: null, fallback: null };
 
     async function saveSettings() {
       const response = await fetch('/api/settings', {
@@ -683,7 +890,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           photoRoot: textValue('photoRoot'),
           configRoot: textValue('configRoot'),
           logRoot: textValue('logRoot'),
-          defaultFolderPath: textValue('defaultFolderPath'),
           recursive: checkboxValue('recursive'),
           force: checkboxValue('force'),
           writeJson: checkboxValue('writeJson'),
@@ -707,20 +913,13 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       location.reload();
     }
 
-    async function browseFolders(path) {
+    function renderFolderBrowser(data) {
+      currentFolderBrowserData = data;
       const browser = document.getElementById('folderBrowser');
-      browser.textContent = 'Loading folders...';
-      const response = await fetch('/api/folders?path=' + encodeURIComponent(path));
-      if (!response.ok) {
-        browser.textContent = await response.text();
-        return;
-      }
-      const data = await response.json();
       const lines = [];
       lines.push(`<div class="folder-browser-toolbar">`);
       lines.push(`<strong>${escapeHtml(data.path)}</strong>`);
       lines.push(`<button type="button" onclick="addSelectedFolder('${escapeJs(data.path)}')">Add this folder</button>`);
-      lines.push(`<button type="button" onclick="useOnlyFolder('${escapeJs(data.path)}')">Use only this folder</button>`);
       if (data.directories.length > 0) {
         lines.push(`<button type="button" onclick="addVisibleFolders(${JSON.stringify(data.directories)})">Add all visible folders</button>`);
       }
@@ -730,9 +929,20 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       for (const directory of data.directories) {
         const label = directory.split('/').filter(Boolean).pop() || directory;
         const isSelected = selectedFolders.includes(directory);
-        lines.push(`<div class="folder-row"><button type="button" onclick="browseFolders('${escapeJs(directory)}')">Browse</button><span>${escapeHtml(label)}${isSelected ? ' • selected' : ''}</span><button type="button" onclick="selectFolder('${escapeJs(directory)}')">Add</button><button type="button" onclick="useOnlyFolder('${escapeJs(directory)}')">Use only this folder</button></div>`);
+        lines.push(`<div class="folder-row"><button type="button" onclick="browseFolders('${escapeJs(directory)}')">Browse</button><span>${escapeHtml(label)}${isSelected ? ' • selected' : ''}</span><button type="button" onclick="selectFolder('${escapeJs(directory)}')">Add</button></div>`);
       }
       browser.innerHTML = lines.join('');
+    }
+
+    async function browseFolders(path) {
+      const browser = document.getElementById('folderBrowser');
+      browser.textContent = 'Loading folders...';
+      const response = await fetch('/api/folders?path=' + encodeURIComponent(path));
+      if (!response.ok) {
+        browser.textContent = await response.text();
+        return;
+      }
+      renderFolderBrowser(await response.json());
     }
 
     function selectFolder(path) {
@@ -776,13 +986,31 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     }
 
     document.getElementById('folderPath').addEventListener('input', onFolderPathChanged);
+    document.getElementById('fallbackEnabled').addEventListener('change', () => {
+      updateFallbackControlState();
+      refreshProfileSummary();
+      refreshFallbackPresetSummary();
+      if (checkboxValue('fallbackEnabled')) {
+        scheduleModelRefresh('fallback');
+      }
+    });
+    document.getElementById('primaryOllamaUrl').addEventListener('change', () => scheduleModelRefresh('primary'));
+    document.getElementById('fallbackOllamaUrl').addEventListener('change', () => scheduleModelRefresh('fallback'));
     ['primaryOllamaUrl', 'primaryModel', 'maxImageSize', 'fallbackEnabled', 'fallbackOllamaUrl', 'fallbackModel', 'fallbackMaxImageSize']
       .forEach(id => document.getElementById(id).addEventListener(id === 'fallbackEnabled' ? 'change' : 'input', refreshProfileSummary));
 
+    setSelectValue('primaryModel', '{{Encode(settings.PrimaryModel)}}');
+    setSelectValue('fallbackModel', '{{Encode(settings.FallbackModel)}}');
+    updateFallbackControlState();
     renderSelectedFolders();
     refreshProfileSummary();
+    refreshFallbackPresetSummary();
     if (initialProfilePresetId !== 'Custom') {
       document.getElementById('profilePreset').value = initialProfilePresetId;
+    }
+    scheduleModelRefresh('primary');
+    if (checkboxValue('fallbackEnabled')) {
+      scheduleModelRefresh('fallback');
     }
     browseFolders(document.getElementById('folderPath').value);
     if ({{(status.IsRunning ? "true" : "false")}}) {
@@ -886,3 +1114,5 @@ public sealed record ImmichTaggerSettingsUpdate(
     string? ImmichApiKey);
 
 public sealed record FolderBrowseResponse(string Path, string? Parent, IReadOnlyList<string> Directories);
+
+public sealed record OllamaModelsResponse(string BaseUrl, IReadOnlyList<string> Models);

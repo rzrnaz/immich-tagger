@@ -41,7 +41,7 @@ public sealed class ScanJobService
             _activePauseController = new PhotoAiPauseController();
             _recentLogLines.Clear();
 
-            string[] selectedFolders = GetSelectedFolders(request, settings.DefaultFolderPath);
+            string[] selectedFolders = GetSelectedFolders(request, settings.PhotoRoot);
             string startMessage = selectedFolders.Length > 1
                 ? (dryRun ? $"Dry run started for {selectedFolders.Length} selected folders." : $"Live scan started for {selectedFolders.Length} selected folders.")
                 : (dryRun ? "Dry run started." : "Live scan started.");
@@ -144,7 +144,7 @@ public sealed class ScanJobService
     private async Task RunScanAsync(ImmichTaggerSettings settings, ScanStartRequest request, bool dryRun, CancellationToken cancellationToken)
     {
         PhotoAiScanSummary? completedSummary = null;
-        string[] selectedFolders = GetSelectedFolders(request, settings.DefaultFolderPath);
+        string[] selectedFolders = GetSelectedFolders(request, settings.PhotoRoot);
 
         try
         {

@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>immich-tagger</Name>
-  <Repository>ghcr.io/rzrnaz/immich-tagger-public:v1.0.2-unraid1</Repository>
+  <Repository>ghcr.io/rzrnaz/immich-tagger-public:v1.0.3-unraid1</Repository>
   <Registry>https://github.com/rzrnaz/immich-tagger/pkgs/container/immich-tagger-public</Registry>
   <Network>bridge</Network>
   <MyIP/>
@@ -13,7 +13,7 @@
   <Category>MediaApp:Photos Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/rzrnaz/immich-tagger/main/docker/unraid/immich-tagger.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/rzrnaz/immich-tagger/main/PhotoAIApp.Gui/Assets/PhotoAIApp.png</Icon>
+  <Icon>https://raw.githubusercontent.com/rzrnaz/immich-tagger/main/PhotoAIApp.Gui/Assets/PhotoAIApp.ico</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
@@ -22,7 +22,7 @@
   <DonateLink/>
   <Requires>External Ollama server reachable from the container. Photo library mapped to /photos. Persistent config mapped to /config.</Requires>
 
-  <Config Name="Web UI Port" Target="8080" Default="8080" Mode="tcp" Description="Port for the Immich Tagger web UI." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Web UI Port" Target="8080" Default="8083" Mode="tcp" Description="Port for the Immich Tagger web UI." Type="Port" Display="always" Required="true" Mask="false">8083</Config>
   <Config Name="Photo Library" Target="/photos" Default="/mnt/user/photos" Mode="rw" Description="Host photo library or Immich external-library share. The container sees this as /photos and writes XMP sidecars next to images." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/photos</Config>
   <Config Name="App Config" Target="/config" Default="/mnt/user/appdata/immich-tagger" Mode="rw" Description="Persistent Immich Tagger configuration, logs, and local secrets. Do not map this to a media folder." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/immich-tagger</Config>
 

@@ -599,6 +599,8 @@ Assert(serverProgramSource.Contains("app.MapGet(\"/api/folders\"", StringCompari
     "Docker server UI should expose a folder browsing API for directories under /photos");
 Assert(serverProgramSource.Contains("app.MapGet(\"/api/log\"", StringComparison.Ordinal),
     "Docker server UI should expose safe log links for run/anomaly logs");
+Assert(serverProgramSource.Contains("app.MapGet(\"/api/models\"", StringComparison.Ordinal),
+    "Docker server UI should proxy Ollama model discovery so the web form can refresh available models after endpoint changes");
 Assert(serverProgramSource.Contains("validatePathForRead", StringComparison.Ordinal)
     || serverProgramSource.Contains("ValidatePathForRead", StringComparison.Ordinal),
     "Docker server log/folder endpoints should validate requested paths before reading server files");
@@ -606,8 +608,14 @@ Assert(serverProgramSource.Contains("id=\"primaryOllamaUrl\"", StringComparison.
     "Docker server settings editor should expose the primary Ollama URL");
 Assert(serverProgramSource.Contains("id=\"primaryModel\"", StringComparison.Ordinal),
     "Docker server settings editor should expose the primary model");
+Assert(serverProgramSource.Contains("id=\"primaryModelStatus\"", StringComparison.Ordinal),
+    "Docker server settings editor should show primary model-refresh status near the model dropdown");
 Assert(serverProgramSource.Contains("id=\"fallbackEnabled\"", StringComparison.Ordinal),
     "Docker server settings editor should expose the fallback enable switch");
+Assert(serverProgramSource.Contains("id=\"fallbackPreset\"", StringComparison.Ordinal),
+    "Docker server settings editor should expose fallback-server preset shortcuts for the Unraid GPU path");
+Assert(serverProgramSource.Contains("id=\"fallbackModelStatus\"", StringComparison.Ordinal),
+    "Docker server settings editor should show fallback model-refresh status near the fallback model dropdown");
 Assert(serverProgramSource.Contains("id=\"overwriteSidecars\"", StringComparison.Ordinal),
     "Docker server settings editor should expose the overwrite sidecars switch");
 Assert(serverProgramSource.Contains("openLogLink", StringComparison.Ordinal),
@@ -634,10 +642,13 @@ Assert(serverProgramSource.Contains("selectedFoldersList", StringComparison.Ordi
     "Docker server home page should show the selected folder list for multi-folder runs");
 Assert(serverProgramSource.Contains("statusSelectedFolderSummary", StringComparison.Ordinal),
     "Docker server status panel should expose a live selected-folder summary element so idle UI state stays in sync with the current selection");
-Assert(serverProgramSource.Contains("JsonSerializer.Serialize(explicitSelectedFolders)", StringComparison.Ordinal),
-    "Docker server should only seed explicit selected folders into the page, not silently preselect the default folder");
+Assert(serverProgramSource.Contains("status.IsRunning && status.SelectedFolderPaths.Count > 0", StringComparison.Ordinal)
+    && serverProgramSource.Contains("JsonSerializer.Serialize(explicitSelectedFolders)", StringComparison.Ordinal),
+    "Docker server should only seed explicit selected folders into the page while a scan is active, not persist old selections into idle startup");
 Assert(serverProgramSource.Contains("document.getElementById('folderPath').addEventListener('input', onFolderPathChanged)", StringComparison.Ordinal),
     "Docker server folder summary should refresh when the typed folder path changes");
+Assert(serverProgramSource.Contains(": settings.PhotoRoot;", StringComparison.Ordinal),
+    "Docker server idle startup should reset the folder field back to the /photos root instead of reusing the last scan folder");
 Assert(!serverProgramSource.Contains("id=\"dryRunDefault\"", StringComparison.Ordinal),
     "Docker server settings should not expose a Dry run by default toggle when dedicated Dry Run and Run Scan actions already exist");
 Assert(serverProgramSource.Contains("addSelectedFolder", StringComparison.Ordinal),
@@ -666,6 +677,8 @@ Assert(serverProgramSource.Contains("togglePauseResume", StringComparison.Ordina
     "Docker server home page should offer a pause/resume control");
 Assert(serverProgramSource.Contains("button class=\"pause\"", StringComparison.Ordinal),
     "Docker server scan controls should render a dedicated pause/resume button");
+Assert(serverProgramSource.Contains("class=\"pause\" {{scanButtonsDisabled}} onclick=\"startScan('/api/dry-run')\"", StringComparison.Ordinal),
+    "Dry Run should use the same warm styling as Pause for visual consistency");
 Assert(serverProgramSource.Contains("scanButtonsDisabled", StringComparison.Ordinal)
     && serverProgramSource.Contains("activeScanButtonsDisabled", StringComparison.Ordinal),
     "Docker server home page should disable start controls during an active scan and disable pause/stop controls while idle");
@@ -675,6 +688,11 @@ Assert(serverProgramSource.Contains("id=\"profileSummary\"", StringComparison.Or
     "Docker server settings editor should show a human-readable preset/profile summary like the Windows app");
 Assert(serverProgramSource.Contains("applyProfilePreset", StringComparison.Ordinal),
     "Docker server home page should apply model preset settings from the web UI without manual field editing");
+Assert(serverProgramSource.Contains("applyFallbackPreset", StringComparison.Ordinal),
+    "Docker server home page should apply fallback-server presets without manual field editing");
+Assert(serverProgramSource.Contains("scheduleModelRefresh", StringComparison.Ordinal)
+    && serverProgramSource.Contains("refreshModelsForTarget", StringComparison.Ordinal),
+    "Docker server home page should refresh available Ollama models when the endpoint changes");
 Assert(serverProgramSource.Contains("<progress", StringComparison.Ordinal),
     "Docker server status panel should render a progress bar for richer live parity with Windows 1.39");
 Assert(serverProgramSource.Contains("Current file", StringComparison.Ordinal),
@@ -683,8 +701,15 @@ Assert(serverProgramSource.Contains("selectedFolderCount", StringComparison.Ordi
     "Docker server folder selection UI should show a selected-folder count summary");
 Assert(serverProgramSource.Contains("addVisibleFolders", StringComparison.Ordinal),
     "Docker server folder browser should support quickly adding all currently visible child folders");
-Assert(serverProgramSource.Contains("Use only this folder", StringComparison.Ordinal),
-    "Docker server folder browser should support quickly replacing the current selection with one folder");
+Assert(serverProgramSource.Contains("renderFolderBrowser(currentFolderBrowserData)", StringComparison.Ordinal),
+    "Docker server folder browser should rerender selected markers immediately after folder add/remove actions");
+Assert(!serverProgramSource.Contains("Use only this folder", StringComparison.Ordinal),
+    "Docker server folder browser should not expose a redundant 'Use only this folder' action when selecting one folder already achieves the same result");
+Assert(!serverProgramSource.Contains("id=\"defaultFolderPath\"", StringComparison.Ordinal),
+    "Docker server settings should not expose a separate editable default folder field when idle startup must always begin at /photos");
+Assert(serverProgramSource.Contains("<link rel=\"icon\" href=\"/favicon.ico\"", StringComparison.Ordinal)
+    && serverProgramSource.Contains("app.MapGet(\"/favicon.ico\"", StringComparison.Ordinal),
+    "Docker server should serve the Windows app icon as the web page favicon");
 Assert(serverProgramSource.Contains("if ({{(status.IsRunning ? \"true\" : \"false\")}})", StringComparison.Ordinal),
     "Docker server home page should only auto-refresh while a scan is active so idle folder selections are not wiped during setup/testing");
 
@@ -701,6 +726,10 @@ Assert(scanJobServiceSource.Contains("SyncImmichSidecarMetadataAsync", StringCom
     "Server scan service should implement post-run Immich sync behavior");
 Assert(scanJobServiceSource.Contains("GetSelectedFolders", StringComparison.Ordinal),
     "Server scan service should normalize and de-duplicate selected folders before running a job");
+Assert(scanJobServiceSource.Contains("GetSelectedFolders(request, settings.PhotoRoot)", StringComparison.Ordinal),
+    "Server scan service should fall back to the /photos root for idle startup and scan requests, not a sticky last-used folder");
+Assert(scanJobServiceSource.Contains("_recentLogLines.Clear();", StringComparison.Ordinal),
+    "Starting a new server scan should clear the prior web-page recent log before new output appears");
 Assert(scanJobServiceSource.Contains("PhotoAiScanSummary.Combine(summaries)", StringComparison.Ordinal),
     "Server scan service should combine per-folder summaries into one aggregate result for multi-folder runs");
 Assert(scanJobServiceSource.Contains("selected_folders=", StringComparison.Ordinal),
