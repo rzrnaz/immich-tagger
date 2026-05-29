@@ -43,7 +43,7 @@ public sealed class ImmichTaggerSettings
     public int? Limit { get; set; }
 
     [ConfigurationKeyName("PRIMARY_OLLAMA_URL")]
-    public string PrimaryOllamaUrl { get; set; } = PhotoAiDefaults.UnraidOllamaBaseUrl;
+    public string PrimaryOllamaUrl { get; set; } = PhotoAiDefaults.ContainerPrimaryOllamaBaseUrl;
 
     [ConfigurationKeyName("PRIMARY_MODEL")]
     public string PrimaryModel { get; set; } = PhotoAiDefaults.QwenPcModel;

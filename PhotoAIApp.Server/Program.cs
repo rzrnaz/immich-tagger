@@ -8,6 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddEnvironmentVariables(prefix: "IMMICH_TAGGER__");
 ImmichTaggerSettings initialSettings = builder.Configuration.Get<ImmichTaggerSettings>() ?? new ImmichTaggerSettings();
 LoadPersistedSettings(initialSettings);
+NormalizeConfiguredSettings(initialSettings);
 builder.Services.AddSingleton(initialSettings);
 builder.Services.AddSingleton<ScanJobService>();
 
@@ -157,11 +158,11 @@ static void ApplySettingsUpdate(ImmichTaggerSettings settings, ImmichTaggerSetti
     settings.AddTags = request.AddTags;
     settings.OverwriteSidecars = request.OverwriteSidecars;
     settings.Limit = request.Limit is > 0 ? request.Limit : null;
-    settings.PrimaryOllamaUrl = CleanText(request.PrimaryOllamaUrl, settings.PrimaryOllamaUrl);
+    settings.PrimaryOllamaUrl = NormalizeConfiguredOllamaBaseUrl(request.PrimaryOllamaUrl, settings.PrimaryOllamaUrl);
     settings.PrimaryModel = CleanText(request.PrimaryModel, settings.PrimaryModel);
     settings.MaxImageSize = Math.Max(0, request.MaxImageSize);
     settings.FallbackEnabled = request.FallbackEnabled;
-    settings.FallbackOllamaUrl = CleanText(request.FallbackOllamaUrl, settings.FallbackOllamaUrl);
+    settings.FallbackOllamaUrl = NormalizeConfiguredOllamaBaseUrl(request.FallbackOllamaUrl, settings.FallbackOllamaUrl);
     settings.FallbackModel = CleanText(request.FallbackModel, settings.FallbackModel);
     settings.FallbackMaxImageSize = Math.Max(0, request.FallbackMaxImageSize);
     settings.SyncImmich = request.SyncImmich;
@@ -170,6 +171,12 @@ static void ApplySettingsUpdate(ImmichTaggerSettings settings, ImmichTaggerSetti
 }
 
 static string CleanText(string? value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+static string NormalizeConfiguredOllamaBaseUrl(string? value, string fallback)
+{
+    string candidate = CleanText(value, fallback);
+    return NormalizeOllamaBaseUrl(candidate);
+}
 
 static string CleanPath(string? value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : Path.GetFullPath(value.Trim());
 
@@ -273,6 +280,12 @@ static string NormalizeOllamaBaseUrl(string? baseUrl)
     return PhotoAiModelProfile.BuildBaseUrl(baseUrl ?? string.Empty, 11434);
 }
 
+static void NormalizeConfiguredSettings(ImmichTaggerSettings settings)
+{
+    settings.PrimaryOllamaUrl = NormalizeOllamaBaseUrl(settings.PrimaryOllamaUrl);
+    settings.FallbackOllamaUrl = NormalizeOllamaBaseUrl(settings.FallbackOllamaUrl);
+}
+
 static string[] NormalizeModelListForTarget(IEnumerable<string> discoveredModels, bool isFallback)
 {
     IEnumerable<string> models = discoveredModels.Where(model => !string.IsNullOrWhiteSpace(model));
@@ -334,11 +347,11 @@ static void CopySettings(ImmichTaggerSettings source, ImmichTaggerSettings targe
     target.DryRunDefault = source.DryRunDefault;
     target.OverwriteSidecars = source.OverwriteSidecars;
     target.Limit = source.Limit;
-    target.PrimaryOllamaUrl = source.PrimaryOllamaUrl;
+    target.PrimaryOllamaUrl = NormalizeOllamaBaseUrl(source.PrimaryOllamaUrl);
     target.PrimaryModel = source.PrimaryModel;
     target.MaxImageSize = source.MaxImageSize;
     target.FallbackEnabled = source.FallbackEnabled;
-    target.FallbackOllamaUrl = source.FallbackOllamaUrl;
+    target.FallbackOllamaUrl = NormalizeOllamaBaseUrl(source.FallbackOllamaUrl);
     target.FallbackModel = source.FallbackModel;
     target.FallbackMaxImageSize = source.FallbackMaxImageSize;
     target.SyncImmich = source.SyncImmich;
@@ -618,11 +631,32 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
   </main>
 
   <script>
-    let selectedFolders = {{selectedFoldersJson}};
+    const selectedFoldersStorageKey = 'immichTagger.selectedFolders';
+    let selectedFolders = loadSelectedFolders();
     let currentFolderBrowserData = null;
     const profilePresets = {{profilePresetsJson}};
     const fallbackPresets = {{fallbackPresetsJson}};
     const initialProfilePresetId = '{{currentProfileIdText}}';
+
+    function loadSelectedFolders() {
+      const serverSelectedFolders = dedupeFolders({{selectedFoldersJson}});
+      if (serverSelectedFolders.length > 0) {
+        persistSelectedFolders(serverSelectedFolders);
+        return serverSelectedFolders;
+      }
+
+      try {
+        const persisted = JSON.parse(window.sessionStorage.getItem(selectedFoldersStorageKey) || '[]');
+        return Array.isArray(persisted) ? dedupeFolders(persisted) : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function persistSelectedFolders(paths) {
+      const normalized = dedupeFolders(paths);
+      window.sessionStorage.setItem(selectedFoldersStorageKey, JSON.stringify(normalized));
+    }
 
     const numericValue = (id) => {
       const raw = document.getElementById(id).value;
@@ -647,10 +681,17 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
     function renderSelectedFolders() {
       selectedFolders = dedupeFolders(selectedFolders);
+      persistSelectedFolders(selectedFolders);
       const host = document.getElementById('selectedFoldersList');
       const count = document.getElementById('selectedFolderCount');
       const summary = document.getElementById('statusSelectedFolderSummary');
+      const folderPathInput = document.getElementById('folderPath');
       const typedPath = (document.getElementById('folderPath').value || '').trim();
+      if (selectedFolders.length > 0
+        && (!typedPath || typedPath === '{{Encode(settings.PhotoRoot)}}')
+        && folderPathInput) {
+        folderPathInput.value = selectedFolders[0];
+      }
       count.textContent = selectedFolders.length === 0
         ? 'No explicit folder selections yet'
         : `${selectedFolders.length} selected folder${selectedFolders.length === 1 ? '' : 's'}`;

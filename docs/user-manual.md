@@ -59,7 +59,7 @@ The tool creates both JSON diagnostic files (for troubleshooting) and XMP sideca
 | Photo Root | Directory where photos are located | `/photos` |
 | Config Root | Directory for app config/logs | `/config` |
 | Log Root | Directory for log files | `/config/logs` |
-| Primary Ollama URL | URL of the primary Ollama server | `http://192.168.1.8:11434` |
+| Primary Ollama URL | URL of the primary Ollama server | `http://192.168.1.4:11434` |
 | Primary Model | Name of the primary vision model | `qwen2.5vl:7b` |
 | Max Image Size | Resize images before sending to model (0 = no resize) | `0` |
 | Fallback Enabled | Enable fallback model if primary fails | `true` |

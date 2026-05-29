@@ -85,7 +85,7 @@ All settings can be adjusted via environment variables with the prefix `IMMICH_T
 Example:
 ```
 IMMICH_TAGGER__PHOTO_ROOT=/photos
-IMMICH_TAGGER__PRIMARY_OLLAMA_URL=http://localhost:11434
+IMMICH_TAGGER__PRIMARY_OLLAMA_URL=http://192.168.1.4:11434
 IMMICH_TAGGER__PRIMARY_MODEL=qwen2.5vl:7b
 ```
 
@@ -109,7 +109,7 @@ Configuration is bound using standard .NET configuration mechanisms:
 
 1. Build Docker image:
    ```
-   docker build -t immich-tagger:latest .
+   docker build -t immich-tagger:local .
    ```
 
 2. Run container:
@@ -118,9 +118,9 @@ Configuration is bound using standard .NET configuration mechanisms:
      -p 8080:8080 \
      -v /mnt/user/photos:/photos \
      -v /mnt/user/appdata/immich-tagger:/config \
-     -e IMMICH_TAGGER__PRIMARY_OLLAMA_URL=http://192.168.1.8:11434 \
+     -e IMMICH_TAGGER__PRIMARY_OLLAMA_URL=http://192.168.1.4:11434 \
      -e IMMICH_TAGGER__PRIMARY_MODEL=qwen2.5vl:7b \
-     immich-tagger:latest
+     immich-tagger:local
    ```
 
 ### Testing

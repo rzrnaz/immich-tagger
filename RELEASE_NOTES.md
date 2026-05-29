@@ -62,9 +62,9 @@ docker run --rm \
   -p 8080:8080 \
   -v /mnt/user/photos:/photos \
   -v /mnt/user/appdata/immich-tagger:/config \
-  -e IMMICH_TAGGER__PRIMARY_OLLAMA_URL=http://192.168.1.8:11434 \
+  -e IMMICH_TAGGER__PRIMARY_OLLAMA_URL=http://192.168.1.4:11434 \
   -e IMMICH_TAGGER__PRIMARY_MODEL=qwen2.5vl:7b \
-  ghcr.io/rzrnaz/immich-tagger-public:latest
+  ghcr.io/rzrnaz/immich-tagger-public:v1.0.5-unraid1
 ```
 
 ## Getting Started
@@ -74,7 +74,7 @@ docker run --rm \
 2. Run `PhotoAIApp.Gui.exe`
 
 ### Docker Server  
-1. Build the Docker image: `docker build -t immich-tagger:latest .`
+1. Build the Docker image locally: `docker build -t immich-tagger:local .`
 2. Run with appropriate volumes and environment variables
 
 ## Version History

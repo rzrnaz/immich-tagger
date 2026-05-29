@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>immich-tagger</Name>
-  <Repository>ghcr.io/rzrnaz/immich-tagger-public:v1.0.4-unraid1</Repository>
+  <Repository>ghcr.io/rzrnaz/immich-tagger-public:v1.0.5-unraid1</Repository>
   <Registry>https://github.com/rzrnaz/immich-tagger/pkgs/container/immich-tagger-public</Registry>
   <Network>bridge</Network>
   <MyIP/>

@@ -74,7 +74,7 @@ PhotoAIApp or CLI    command-line runner for scripted jobs
 Planned Docker defaults:
 
 ```text
-Image:        ghcr.io/rzrnaz/immich-tagger-public:latest
+Image:        ghcr.io/rzrnaz/immich-tagger-public:v1.0.5-unraid1
 Web UI:       http://server-ip:8080
 /photos:      photo library or Immich external-library share
 /config:      persistent appdata/config/logs

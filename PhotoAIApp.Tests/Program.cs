@@ -117,6 +117,11 @@ AssertEqual("0s", PhotoAiDefaults.OllamaUnloadKeepAlive, "Ollama unload keep_ali
 AssertEqual(3, PhotoAiDefaults.OllamaAnalysisTimeoutMinutes, "Primary and fallback Ollama image analysis calls should use the split-the-difference 3-minute timeout");
 AssertEqual(1000, PhotoAiDefaults.PrimaryTransientRetryDelayMilliseconds, "Primary transient retries should pause briefly before trying Qwen again");
 AssertEqual("qwen2.5vl:7b", PhotoAiDefaults.QwenPcModel, "Qwen PC default should now be the validated 7B model");
+AssertEqual("http://192.168.1.4:11434", PhotoAiDefaults.ContainerPrimaryOllamaBaseUrl, "Container primary Ollama default should target the validated Qwen host");
+
+var defaultServerSettings = new ImmichTaggerSettings();
+AssertEqual(PhotoAiDefaults.ContainerPrimaryOllamaBaseUrl, defaultServerSettings.PrimaryOllamaUrl, "Server/container settings should default the primary Ollama URL to the validated Qwen host");
+AssertEqual(PhotoAiDefaults.UnraidOllamaBaseUrl, defaultServerSettings.FallbackOllamaUrl, "Server/container settings should keep Unraid MiniCPM as the default fallback host");
 
 var highQualityProfile = PhotoAiModelProfile.GetPreset(PhotoAiModelProfileId.HighQuality);
 AssertEqual(PhotoAiModelProfileId.HighQuality, highQualityProfile.ProfileId, "High Quality preset should identify itself");
@@ -629,6 +634,8 @@ Assert(serverProgramSource.Contains("SavePersistedSettings(settings)", StringCom
     "Docker server settings POST should write persisted settings for container restarts");
 Assert(serverProgramSource.Contains("LoadPersistedSettings(initialSettings)", StringComparison.Ordinal),
     "Docker server startup should reload persisted settings after applying environment defaults");
+Assert(serverProgramSource.Contains("NormalizeConfiguredSettings(initialSettings)", StringComparison.Ordinal),
+    "Docker server startup should normalize configured Ollama URLs so host:port values become canonical http URLs before use");
 Assert(serverProgramSource.Contains("TryNormalizeScanRequest", StringComparison.Ordinal),
     "Docker server should validate and normalize requested scan roots before starting a background job");
 Assert(serverProgramSource.Contains("PhotoAiLiveRunPreflight.ValidateWritableOutputs", StringComparison.Ordinal),
@@ -646,6 +653,9 @@ Assert(serverProgramSource.Contains("statusSelectedFolderSummary", StringCompari
 Assert(serverProgramSource.Contains("status.IsRunning && status.SelectedFolderPaths.Count > 0", StringComparison.Ordinal)
     && serverProgramSource.Contains("JsonSerializer.Serialize(explicitSelectedFolders)", StringComparison.Ordinal),
     "Docker server should only seed explicit selected folders into the page while a scan is active, not persist old selections into idle startup");
+Assert(serverProgramSource.Contains("sessionStorage.getItem(selectedFoldersStorageKey)", StringComparison.Ordinal)
+    && serverProgramSource.Contains("persistSelectedFolders(serverSelectedFolders)", StringComparison.Ordinal),
+    "Docker server web UI should preserve explicit selected folders across reloads so a verified dry run can be followed immediately by a live scan without silently falling back to /photos");
 Assert(serverProgramSource.Contains("document.getElementById('folderPath').addEventListener('input', onFolderPathChanged)", StringComparison.Ordinal),
     "Docker server folder summary should refresh when the typed folder path changes");
 Assert(serverProgramSource.Contains(": settings.PhotoRoot;", StringComparison.Ordinal),
@@ -699,6 +709,9 @@ Assert(serverProgramSource.Contains("addEventListener('blur', () => scheduleMode
     "Docker server should refresh Ollama models when an endpoint field loses focus after editing, not only on the initial page load");
 Assert(serverProgramSource.Contains("Unable to load models from ${baseUrl}. ${message}", StringComparison.Ordinal),
     "Docker server should surface the actual model-discovery error near the endpoint field so stale model lists are easier to diagnose");
+Assert(serverProgramSource.Contains("NormalizeConfiguredOllamaBaseUrl(request.PrimaryOllamaUrl, settings.PrimaryOllamaUrl)", StringComparison.Ordinal)
+    && serverProgramSource.Contains("NormalizeConfiguredOllamaBaseUrl(request.FallbackOllamaUrl, settings.FallbackOllamaUrl)", StringComparison.Ordinal),
+    "Docker server settings saves should normalize primary and fallback Ollama URLs so new builds persist canonical endpoint values");
 Assert(serverProgramSource.Contains("<progress", StringComparison.Ordinal),
     "Docker server status panel should render a progress bar for richer live parity with Windows 1.39");
 Assert(serverProgramSource.Contains("Current file", StringComparison.Ordinal),

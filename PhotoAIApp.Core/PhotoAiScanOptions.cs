@@ -114,6 +114,7 @@ public sealed class PhotoAiPauseController
 public static class PhotoAiDefaults
 {
     public static string QwenPcOllamaBaseUrl => $"http://{DetectHostIPv4Address()}:11434";
+    public const string ContainerPrimaryOllamaBaseUrl = "http://192.168.1.4:11434";
     public const string QwenPcModel = "qwen2.5vl:7b";
     public const string UnraidOllamaBaseUrl = "http://192.168.1.8:11434";
     public const string UnraidModel = "minicpm-v:latest";

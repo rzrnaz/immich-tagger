@@ -16,8 +16,8 @@ Immich Tagger can run as a Docker container on Linux systems including Unraid. T
 ## Quick Start
 
 ```bash
-# Build the image
-docker build -t immich-tagger:latest .
+# Build the image locally
+docker build -t immich-tagger:local .
 
 # Run with required volume mappings
 docker run --rm \
@@ -27,7 +27,7 @@ docker run --rm \
   -e IMMICH_TAGGER__PRIMARY_OLLAMA_URL=http://192.168.1.4:11434 \
   -e IMMICH_TAGGER__PRIMARY_MODEL=qwen2.5vl:7b \
   -e IMMICH_TAGGER__FALLBACK_ENABLED=false \
-  immich-tagger:latest
+  immich-tagger:local
 ```
 
 For live runs, `/photos` must be mounted **read-write** because the container writes `*.jpg.xmp` sidecars and `.photoai` anomaly logs next to the scanned media. A read-only `/photos` mount is only suitable for folder browsing and dry-run previews. The server now performs a live-run write preflight and will block the run early with a clear error if the selected folders or their `.photoai` log directories are not writable.
@@ -39,7 +39,7 @@ All configuration is handled via environment variables with the prefix `IMMICH_T
 - `IMMICH_TAGGER__PHOTO_ROOT` - Container directory for photos (default: `/photos`)
 - `IMMICH_TAGGER__CONFIG_ROOT` - Container directory for config/logs (default: `/config`)
 - `IMMICH_TAGGER__LOG_ROOT` - Container directory for logs (default: `/config/logs`)
-- `IMMICH_TAGGER__PRIMARY_OLLAMA_URL` - URL of primary Ollama server (example: `http://192.168.1.4:11434` for the validated Qwen 7B host)
+- `IMMICH_TAGGER__PRIMARY_OLLAMA_URL` - URL of primary Ollama server (default/example: `http://192.168.1.4:11434` for the validated Qwen 7B host)
 - `IMMICH_TAGGER__PRIMARY_MODEL` - Primary vision model name (default: `qwen2.5vl:7b`)
 - `IMMICH_TAGGER__MAX_IMAGE_SIZE` - Resize images before sending (0 = original/full-res, default: 0)
 - `IMMICH_TAGGER__FALLBACK_ENABLED` - Enable fallback model if primary fails (default: true)
@@ -66,7 +66,7 @@ All configuration is handled via environment variables with the prefix `IMMICH_T
 
 ## Unraid Installation
 
-Use the included Unraid XML template to deploy:
+Use the included Unraid XML template to deploy. New builds should use the pinned published image tag `ghcr.io/rzrnaz/immich-tagger-public:v1.0.5-unraid1` rather than `latest`.
 
 1. From Unraid's "Apps" tab
 2. Click "Add Docker"
