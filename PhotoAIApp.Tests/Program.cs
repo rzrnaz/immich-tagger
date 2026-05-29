@@ -632,6 +632,14 @@ Assert(serverProgramSource.Contains("NormalizeAndValidateSelectedFolders", Strin
     "Docker server should validate multi-folder selections with the shared folder-selection helper");
 Assert(serverProgramSource.Contains("selectedFoldersList", StringComparison.Ordinal),
     "Docker server home page should show the selected folder list for multi-folder runs");
+Assert(serverProgramSource.Contains("statusSelectedFolderSummary", StringComparison.Ordinal),
+    "Docker server status panel should expose a live selected-folder summary element so idle UI state stays in sync with the current selection");
+Assert(serverProgramSource.Contains("JsonSerializer.Serialize(explicitSelectedFolders)", StringComparison.Ordinal),
+    "Docker server should only seed explicit selected folders into the page, not silently preselect the default folder");
+Assert(serverProgramSource.Contains("document.getElementById('folderPath').addEventListener('input', onFolderPathChanged)", StringComparison.Ordinal),
+    "Docker server folder summary should refresh when the typed folder path changes");
+Assert(!serverProgramSource.Contains("id=\"dryRunDefault\"", StringComparison.Ordinal),
+    "Docker server settings should not expose a Dry run by default toggle when dedicated Dry Run and Run Scan actions already exist");
 Assert(serverProgramSource.Contains("addSelectedFolder", StringComparison.Ordinal),
     "Docker server folder browser should let the operator add folders into a selected-folder run list");
 Assert(serverProgramSource.Contains("body: JSON.stringify({ folderPath, folderPaths, limit })", StringComparison.Ordinal),

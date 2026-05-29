@@ -131,7 +131,6 @@ static void ApplySettingsUpdate(ImmichTaggerSettings settings, ImmichTaggerSetti
     settings.WriteJson = request.WriteJson;
     settings.WriteXmp = request.WriteXmp;
     settings.AddTags = request.AddTags;
-    settings.DryRunDefault = request.DryRunDefault;
     settings.OverwriteSidecars = request.OverwriteSidecars;
     settings.Limit = request.Limit is > 0 ? request.Limit : null;
     settings.PrimaryOllamaUrl = CleanText(request.PrimaryOllamaUrl, settings.PrimaryOllamaUrl);
@@ -314,10 +313,12 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 {
     string Encode(string? value) => HtmlEncoder.Default.Encode(value ?? string.Empty);
     string Checked(bool value) => value ? "checked" : string.Empty;
-    string[] selectedFolders = status.SelectedFolderPaths.Count > 0
+    string[] explicitSelectedFolders = status.SelectedFolderPaths.Count > 0
         ? status.SelectedFolderPaths.ToArray()
-        : [string.IsNullOrWhiteSpace(status.FolderPath) ? settings.DefaultFolderPath : status.FolderPath];
-    string folder = Encode(selectedFolders.FirstOrDefault() ?? settings.DefaultFolderPath);
+        : [];
+    string currentFolder = explicitSelectedFolders.FirstOrDefault()
+        ?? (string.IsNullOrWhiteSpace(status.FolderPath) ? settings.DefaultFolderPath : status.FolderPath);
+    string folder = Encode(currentFolder);
     string message = Encode(status.Message);
     string error = Encode(status.Error ?? string.Empty);
     string recentLog = string.Join("\n", status.RecentLogLines.Select(HtmlEncoder.Default.Encode));
@@ -330,14 +331,14 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     string openLogLink = string.IsNullOrWhiteSpace(runLogPath)
         ? "<span>No run log available yet.</span>"
         : $"<a id=\"openLogLink\" href=\"/api/log?path={Uri.EscapeDataString(runLogPath)}\" target=\"_blank\">Open Log</a>";
-    string selectedFoldersJson = JsonSerializer.Serialize(selectedFolders);
+    string selectedFoldersJson = JsonSerializer.Serialize(explicitSelectedFolders);
     string scanButtonsDisabled = status.IsRunning ? "disabled" : string.Empty;
     string activeScanButtonsDisabled = status.IsRunning ? string.Empty : "disabled";
-    string selectedFolderSummary = status.SelectedFolderPaths.Count switch
+    string selectedFolderSummary = explicitSelectedFolders.Length switch
     {
-        > 1 => $"{status.SelectedFolderPaths.Count} selected folders",
-        1 => Encode(status.SelectedFolderPaths[0]),
-        _ => Encode(selectedFolders[0])
+        > 1 => $"{explicitSelectedFolders.Length} selected folders",
+        1 => Encode(explicitSelectedFolders[0]),
+        _ => Encode(currentFolder)
     };
 
     PhotoAiModelProfile currentProfile = BuildProfileFromSettings(settings);
@@ -456,7 +457,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       <h2>Status: {{running}}</h2>
       <div class="status-grid">
         <div class="status-metric"><div class="label">Message</div><div class="value">{{message}}</div></div>
-        <div class="status-metric"><div class="label">Selected folders</div><div class="value">{{selectedFolderSummary}}</div></div>
+        <div class="status-metric"><div class="label">Selected folders</div><div id="statusSelectedFolderSummary" class="value">{{selectedFolderSummary}}</div></div>
         <div class="status-metric"><div class="label">Started</div><div class="value">{{started}}</div></div>
         <div class="status-metric"><div class="label">Finished</div><div class="value">{{finished}}</div></div>
         <div class="status-metric"><div class="label">Pause state</div><div class="value">{{(status.IsPaused ? "Paused" : (status.IsRunning ? "Running" : "Idle"))}}</div></div>
@@ -521,7 +522,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           <label><input id="writeJson" type="checkbox" {{Checked(settings.WriteJson)}}>Model Log (.photoai.json diagnostics)</label>
           <label><input id="writeXmp" type="checkbox" {{Checked(settings.WriteXmp)}}>Write Immich XMP sidecars</label>
           <label><input id="addTags" type="checkbox" {{Checked(settings.AddTags)}}>Add tags</label>
-          <label><input id="dryRunDefault" type="checkbox" {{Checked(settings.DryRunDefault)}}>Dry run by default</label>
           <label><input id="overwriteSidecars" type="checkbox" {{Checked(settings.OverwriteSidecars)}}>Overwrite sidecars</label>
           <label><input id="fallbackEnabled" type="checkbox" {{Checked(settings.FallbackEnabled)}}>Fallback enabled</label>
           <label><input id="syncImmich" type="checkbox" {{Checked(settings.SyncImmich)}}>Sync Immich after live scans</label>
@@ -566,9 +566,14 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       selectedFolders = dedupeFolders(selectedFolders);
       const host = document.getElementById('selectedFoldersList');
       const count = document.getElementById('selectedFolderCount');
+      const summary = document.getElementById('statusSelectedFolderSummary');
+      const typedPath = (document.getElementById('folderPath').value || '').trim();
       count.textContent = selectedFolders.length === 0
         ? 'No explicit folder selections yet'
         : `${selectedFolders.length} selected folder${selectedFolders.length === 1 ? '' : 's'}`;
+      summary.textContent = selectedFolders.length > 1
+        ? `${selectedFolders.length} selected folders`
+        : (selectedFolders[0] || typedPath || '{{Encode(settings.DefaultFolderPath)}}');
       if (selectedFolders.length === 0) {
         host.innerHTML = '<p>No folders selected yet. Use the folder browser or add the current folder.</p>';
         return;
@@ -612,6 +617,10 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
     function setCurrentFolderAsOnlySelection() {
       useOnlyFolder(document.getElementById('folderPath').value);
+    }
+
+    function onFolderPathChanged() {
+      renderSelectedFolders();
     }
 
     function findPresetById(profileId) {
@@ -680,7 +689,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           writeJson: checkboxValue('writeJson'),
           writeXmp: checkboxValue('writeXmp'),
           addTags: checkboxValue('addTags'),
-          dryRunDefault: checkboxValue('dryRunDefault'),
           overwriteSidecars: checkboxValue('overwriteSidecars'),
           limit: numericValue('limit'),
           primaryOllamaUrl: textValue('primaryOllamaUrl'),
@@ -767,6 +775,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       location.reload();
     }
 
+    document.getElementById('folderPath').addEventListener('input', onFolderPathChanged);
     ['primaryOllamaUrl', 'primaryModel', 'maxImageSize', 'fallbackEnabled', 'fallbackOllamaUrl', 'fallbackModel', 'fallbackMaxImageSize']
       .forEach(id => document.getElementById(id).addEventListener(id === 'fallbackEnabled' ? 'change' : 'input', refreshProfileSummary));
 
@@ -863,7 +872,6 @@ public sealed record ImmichTaggerSettingsUpdate(
     bool WriteJson,
     bool WriteXmp,
     bool AddTags,
-    bool DryRunDefault,
     bool OverwriteSidecars,
     int? Limit,
     string? PrimaryOllamaUrl,
