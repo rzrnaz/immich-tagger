@@ -776,7 +776,9 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       document.getElementById('profilePreset').value = initialProfilePresetId;
     }
     browseFolders(document.getElementById('folderPath').value);
-    setTimeout(() => location.reload(), 10000);
+    if ({{(status.IsRunning ? "true" : "false")}}) {
+      setTimeout(() => location.reload(), 10000);
+    }
   </script>
 </body>
 </html>

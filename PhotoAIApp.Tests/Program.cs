@@ -677,6 +677,8 @@ Assert(serverProgramSource.Contains("addVisibleFolders", StringComparison.Ordina
     "Docker server folder browser should support quickly adding all currently visible child folders");
 Assert(serverProgramSource.Contains("Use only this folder", StringComparison.Ordinal),
     "Docker server folder browser should support quickly replacing the current selection with one folder");
+Assert(serverProgramSource.Contains("if ({{(status.IsRunning ? \"true\" : \"false\")}})", StringComparison.Ordinal),
+    "Docker server home page should only auto-refresh while a scan is active so idle folder selections are not wiped during setup/testing");
 
 string settingsSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Core", "ImmichTaggerSettings.cs"));
 Assert(settingsSource.Contains("[ConfigurationKeyName(\"SYNC_IMMICH\")]", StringComparison.Ordinal),

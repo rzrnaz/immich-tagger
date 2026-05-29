@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Immich-Tagger</Name>
-  <Repository>ghcr.io/rzrnaz/immich-tagger-public:latest</Repository>
+  <Repository>ghcr.io/rzrnaz/immich-tagger-public:v1.0.1-unraid1</Repository>
   <Registry>https://github.com/rzrnaz/immich-tagger/pkgs/container/immich-tagger-public</Registry>
   <Network>bridge</Network>
   <MyIP/>
@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/rzrnaz/immich-tagger</Support>
   <Project>https://github.com/rzrnaz/immich-tagger</Project>
-  <Overview>Immich Tagger scans photo folders, sends images to an Ollama vision model, and writes Immich-friendly XMP sidecars plus JSON diagnostics. It is designed for Unraid/Docker photo-library workflows with dry runs, retry/fallback model handling, and detailed run logs.</Overview>
+  <Overview>Immich Tagger scans photo folders, sends images to an Ollama vision model, and writes Immich-friendly XMP sidecars plus optional JSON diagnostics. It is designed for Unraid/Docker photo-library workflows with dry runs, retry/fallback model handling, and detailed run logs.</Overview>
   <Category>MediaApp:Photos Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/rzrnaz/immich-tagger/main/docker/unraid/immich-tagger.xml</TemplateURL>
@@ -21,29 +21,36 @@
   <DonateText/>
   <DonateLink/>
   <Requires>External Ollama server reachable from the container. Photo library mapped to /photos. Persistent config mapped to /config.</Requires>
+
   <Config Name="Web UI Port" Target="8080" Default="8080" Mode="tcp" Description="Port for the Immich Tagger web UI." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
   <Config Name="Photo Library" Target="/photos" Default="/mnt/user/photos" Mode="rw" Description="Host photo library or Immich external-library share. The container sees this as /photos and writes XMP sidecars next to images." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/photos</Config>
   <Config Name="App Config" Target="/config" Default="/mnt/user/appdata/immich-tagger" Mode="rw" Description="Persistent Immich Tagger configuration, logs, and local secrets. Do not map this to a media folder." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/immich-tagger</Config>
+
   <Config Name="PUID" Target="PUID" Default="99" Description="Container user ID. For typical Unraid media writes use 99 (nobody)." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Description="Container group ID. For typical Unraid media writes use 100 (users)." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
   <Config Name="UMASK" Target="UMASK" Default="000" Description="File creation mask. 000 matches the permissive media-sidecar workflow used by the server library." Type="Variable" Display="advanced" Required="true" Mask="false">000</Config>
   <Config Name="Timezone" Target="TZ" Default="America/Phoenix" Description="Timezone for logs and UI timestamps." Type="Variable" Display="always" Required="true" Mask="false">America/Phoenix</Config>
+
   <Config Name="Photo Root" Target="IMMICH_TAGGER__PHOTO_ROOT" Default="/photos" Description="Container path used as the root for selectable/scannable photos." Type="Variable" Display="advanced" Required="true" Mask="false">/photos</Config>
   <Config Name="Config Root" Target="IMMICH_TAGGER__CONFIG_ROOT" Default="/config" Description="Container path for persistent app configuration." Type="Variable" Display="advanced" Required="true" Mask="false">/config</Config>
   <Config Name="Log Root" Target="IMMICH_TAGGER__LOG_ROOT" Default="/config/logs" Description="Container path for persistent web/server logs." Type="Variable" Display="advanced" Required="true" Mask="false">/config/logs</Config>
-  <Config Name="Primary Ollama URL" Target="IMMICH_TAGGER__PRIMARY_OLLAMA_URL" Default="http://192.168.1.4:11434" Description="Primary Ollama server URL reachable from this container. Point this at the host that actually serves qwen2.5vl:7b/7B." Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.4:11434</Config>
+
+  <Config Name="Primary Ollama URL" Target="IMMICH_TAGGER__PRIMARY_OLLAMA_URL" Default="http://192.168.1.4:11434" Description="Primary Ollama server URL reachable from this container. Point this at the host that actually serves the preferred vision model." Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.4:11434</Config>
   <Config Name="Primary Model" Target="IMMICH_TAGGER__PRIMARY_MODEL" Default="qwen2.5vl:7b" Description="Primary Ollama vision model. qwen2.5vl:7b is the preferred high-quality model when available." Type="Variable" Display="always" Required="true" Mask="false">qwen2.5vl:7b</Config>
   <Config Name="Max Image Size" Target="IMMICH_TAGGER__MAX_IMAGE_SIZE" Default="0" Description="Longest-edge resize before sending to the primary model. 0 means original/full resolution." Type="Variable" Display="always" Required="true" Mask="false">0</Config>
+
   <Config Name="Fallback Enabled" Target="IMMICH_TAGGER__FALLBACK_ENABLED" Default="true" Description="Enable fallback model/server attempts after eligible primary failures." Type="Variable" Display="always" Required="true" Mask="false">true</Config>
   <Config Name="Fallback Ollama URL" Target="IMMICH_TAGGER__FALLBACK_OLLAMA_URL" Default="http://192.168.1.8:11434" Description="Fallback Ollama server URL reachable from this container. MiniCPM-V on Unraid is a common compatibility fallback." Type="Variable" Display="always" Required="false" Mask="false">http://192.168.1.8:11434</Config>
-  <Config Name="Fallback Model" Target="IMMICH_TAGGER__FALLBACK_MODEL" Default="minicpm-v:latest" Description="Fallback Ollama vision model. MiniCPM-V is useful for Unraid compatibility but lower quality than Qwen 7B." Type="Variable" Display="always" Required="false" Mask="false">minicpm-v:latest</Config>
+  <Config Name="Fallback Model" Target="IMMICH_TAGGER__FALLBACK_MODEL" Default="minicpm-v:latest" Description="Fallback Ollama vision model. MiniCPM-V is useful for compatibility but lower quality than Qwen 7B." Type="Variable" Display="always" Required="false" Mask="false">minicpm-v:latest</Config>
   <Config Name="Fallback Max Image Size" Target="IMMICH_TAGGER__FALLBACK_MAX_IMAGE_SIZE" Default="0" Description="Longest-edge resize before sending to the fallback model. 0 means original/full resolution." Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+
   <Config Name="Dry Run Default" Target="IMMICH_TAGGER__DRY_RUN_DEFAULT" Default="true" Description="Default new runs to dry-run preview mode for safety." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
   <Config Name="Model Log" Target="IMMICH_TAGGER__WRITE_JSON" Default="false" Description="Keep optional .photoai.json model diagnostic sidecars for review and troubleshooting. Leave false for normal Immich XMP-only output." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
   <Config Name="Write XMP" Target="IMMICH_TAGGER__WRITE_XMP" Default="true" Description="Write Immich-compatible .jpg.xmp sidecars next to images." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
   <Config Name="Add Tags" Target="IMMICH_TAGGER__ADD_TAGS" Default="true" Description="Write AI-generated tags/keywords to XMP. Tags are the primary value of Immich Tagger." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
   <Config Name="Overwrite Sidecars Default" Target="IMMICH_TAGGER__OVERWRITE_SIDECARS" Default="false" Description="Default overwrite behavior for existing JSON/XMP sidecars. Keep false until intentionally reprocessing." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+
   <Config Name="Sync Immich" Target="IMMICH_TAGGER__SYNC_IMMICH" Default="false" Description="After a successful live run, trigger Immich sidecar Discover then Sync using the API settings below." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
-  <Config Name="Immich Base URL" Target="IMMICH_TAGGER__IMMICH_BASE_URL" Default="http://192.168.1.8:2283" Description="Immich server base URL for sidecar Discover/Sync jobs." Type="Variable" Display="advanced" Required="false" Mask="false">http://192.168.1.8:2283</Config>
+  <Config Name="Immich Base URL" Target="IMMICH_TAGGER__IMMICH_BASE_URL" Default="http://192.168.1.8:2283" Description="Immich server base URL for optional sidecar Discover/Sync jobs." Type="Variable" Display="advanced" Required="false" Mask="false">http://192.168.1.8:2283</Config>
   <Config Name="Immich API Key" Target="IMMICH_TAGGER__IMMICH_API_KEY" Default="" Description="Immich API key used for optional Discover/Sync sidecar jobs." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 </Container>
