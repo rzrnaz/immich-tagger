@@ -87,6 +87,11 @@ app.MapPost("/api/run", (ImmichTaggerSettings settings, ScanJobService jobs, Sca
         return Results.BadRequest(new { message = error });
     }
 
+    if (!TryValidateLiveRunWritableOutputs(normalizedRequest, out error))
+    {
+        return Results.BadRequest(new { message = error });
+    }
+
     return jobs.TryStart(settings, normalizedRequest, dryRun: false, out string message)
         ? Results.Accepted("/api/status", new { message })
         : Results.Conflict(new { message });
@@ -216,6 +221,19 @@ static bool TryNormalizeScanRequest(ImmichTaggerSettings settings, ScanStartRequ
         error = ex.Message;
         return false;
     }
+}
+
+static bool TryValidateLiveRunWritableOutputs(ScanStartRequest request, out string? error)
+{
+    PhotoAiLiveRunPreflightResult preflight = PhotoAiLiveRunPreflight.ValidateWritableOutputs(request.FolderPaths ?? []);
+    if (preflight.CanRun)
+    {
+        error = null;
+        return true;
+    }
+
+    error = $"Live scan blocked: {string.Join(" ", preflight.Errors)}";
+    return false;
 }
 
 static string[] GetRequestedFolders(ImmichTaggerSettings settings, ScanStartRequest request)

@@ -278,6 +278,40 @@ AssertEqual(true, modelLogOffMissingXmpPlan.CanWriteXmp, "Model Log off should s
 AssertEqual(true, modelLogOffMissingXmpPlan.ShouldAnalyze, "Scanner should still call the model when XMP is missing even if JSON/model logging is disabled");
 AssertEqual(false, new ImmichTaggerSettings().WriteJson, "Immich Tagger server/default settings should leave Model Log JSON off by default");
 
+string liveRunPreflightRoot = Path.Combine(Path.GetTempPath(), $"photoai-live-run-preflight-tests-{Guid.NewGuid():N}");
+Directory.CreateDirectory(liveRunPreflightRoot);
+try
+{
+    string writableFolder = Path.Combine(liveRunPreflightRoot, "writable");
+    Directory.CreateDirectory(writableFolder);
+    PhotoAiLiveRunPreflightResult writablePreflight = PhotoAiLiveRunPreflight.ValidateWritableOutputs([writableFolder]);
+    AssertEqual(true, writablePreflight.CanRun, "Live-run preflight should allow writable folders");
+    AssertEqual(0, writablePreflight.Errors.Count, "Live-run preflight should not report errors for writable folders");
+
+    string readOnlyFolder = Path.Combine(liveRunPreflightRoot, "read-only");
+    Directory.CreateDirectory(readOnlyFolder);
+    string readOnlyLogFolder = Path.Combine(readOnlyFolder, ".photoai");
+    Directory.CreateDirectory(readOnlyLogFolder);
+
+    if (!OperatingSystem.IsWindows())
+    {
+        File.SetUnixFileMode(readOnlyFolder, UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        File.SetUnixFileMode(readOnlyLogFolder, UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+
+        PhotoAiLiveRunPreflightResult readOnlyPreflight = PhotoAiLiveRunPreflight.ValidateWritableOutputs([readOnlyFolder]);
+        AssertEqual(false, readOnlyPreflight.CanRun, "Live-run preflight should block folders that cannot accept XMP/log writes");
+        Assert(readOnlyPreflight.Errors.Any(error => error.Contains("not writable", StringComparison.OrdinalIgnoreCase)),
+            "Live-run preflight should explain that the selected folder or its .photoai log directory is not writable");
+
+        File.SetUnixFileMode(readOnlyLogFolder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        File.SetUnixFileMode(readOnlyFolder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+    }
+}
+finally
+{
+    Directory.Delete(liveRunPreflightRoot, recursive: true);
+}
+
 var estimatingSnapshot = PhotoAiRunProgressSnapshot.Create(
     state: PhotoAiRunState.Running,
     phase: "Generating descriptions",
@@ -588,6 +622,10 @@ Assert(serverProgramSource.Contains("LoadPersistedSettings(initialSettings)", St
     "Docker server startup should reload persisted settings after applying environment defaults");
 Assert(serverProgramSource.Contains("TryNormalizeScanRequest", StringComparison.Ordinal),
     "Docker server should validate and normalize requested scan roots before starting a background job");
+Assert(serverProgramSource.Contains("PhotoAiLiveRunPreflight.ValidateWritableOutputs", StringComparison.Ordinal),
+    "Docker server live scans should preflight writable sidecar/log outputs before starting work");
+Assert(serverProgramSource.Contains("Live scan blocked:", StringComparison.Ordinal),
+    "Docker server should explain when a live scan is blocked by read-only or unwritable mounts");
 Assert(serverProgramSource.Contains("FolderPaths = normalizedFolders", StringComparison.Ordinal),
     "Docker server scan request normalization should preserve a validated multi-folder selection");
 Assert(serverProgramSource.Contains("NormalizeAndValidateSelectedFolders", StringComparison.Ordinal),

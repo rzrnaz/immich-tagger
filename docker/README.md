@@ -30,7 +30,7 @@ docker run --rm \
   immich-tagger:latest
 ```
 
-For live runs, `/photos` must be mounted **read-write** because the container writes `*.jpg.xmp` sidecars and `.photoai` anomaly logs next to the scanned media. A read-only `/photos` mount is only suitable for folder browsing and dry-run previews.
+For live runs, `/photos` must be mounted **read-write** because the container writes `*.jpg.xmp` sidecars and `.photoai` anomaly logs next to the scanned media. A read-only `/photos` mount is only suitable for folder browsing and dry-run previews. The server now performs a live-run write preflight and will block the run early with a clear error if the selected folders or their `.photoai` log directories are not writable.
 
 ## Environment Variables
 
@@ -120,7 +120,7 @@ Check that the container user (PUID/PGID) has appropriate permissions to read ph
 - PGID: 100 (users)
 - UMASK: 000 (permissive)
 
-If dry run succeeds but live run fails immediately on `.jpg.xmp` or `/photos/.photoai` writes, treat that as a bind-mount/runtime permission problem rather than an Ollama/model problem.
+If dry run succeeds but live run fails immediately on `.jpg.xmp` or `/photos/.photoai` writes, treat that as a bind-mount/runtime permission problem rather than an Ollama/model problem. Newer server builds preflight these writes before the run starts, so a read-only or mismatched-permission mount should be rejected up front with a `Live scan blocked:` message.
 
 ### Model Issues
 
