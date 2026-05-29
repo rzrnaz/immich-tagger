@@ -63,6 +63,15 @@ public sealed class ImmichTaggerSettings
     [ConfigurationKeyName("FALLBACK_MAX_IMAGE_SIZE")]
     public int FallbackMaxImageSize { get; set; } = PhotoAiDefaults.UnraidMaxImageDimensionPixels;
 
+    [ConfigurationKeyName("SYNC_IMMICH")]
+    public bool SyncImmich { get; set; }
+
+    [ConfigurationKeyName("IMMICH_BASE_URL")]
+    public string ImmichBaseUrl { get; set; } = "http://192.168.1.8:2283";
+
+    [ConfigurationKeyName("IMMICH_API_KEY")]
+    public string ImmichApiKey { get; set; } = string.Empty;
+
     public PhotoAiScanOptions ToScanOptions(string folderPath, bool dryRun, int? limit = null)
     {
         return new PhotoAiScanOptions

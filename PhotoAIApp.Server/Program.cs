@@ -36,18 +36,13 @@ app.MapGet("/api/status", (ScanJobService jobs) => Results.Ok(jobs.Status));
 app.MapGet("/api/folders", (ImmichTaggerSettings settings, string? path) =>
 {
     string requestedPath = string.IsNullOrWhiteSpace(path) ? settings.PhotoRoot : path;
-    if (!ValidatePathForRead(requestedPath, [settings.PhotoRoot], out string fullPath, out string? error))
+    if (!TryValidateFolderPath(settings, requestedPath, out string fullPath, out string? error))
     {
         return Results.BadRequest(new { message = error });
     }
 
-    if (!Directory.Exists(fullPath))
-    {
-        return Results.NotFound(new { message = $"Folder does not exist: {fullPath}" });
-    }
-
     string[] directories = Directory.EnumerateDirectories(fullPath)
-        .Where(directory => !IsHiddenOrInternalFolder(directory))
+        .Where(directory => !PhotoAiScanner.IsExcludedScanDirectoryPath(directory, settings.PhotoRoot))
         .OrderBy(directory => Path.GetFileName(directory), StringComparer.OrdinalIgnoreCase)
         .ToArray();
 
@@ -75,14 +70,24 @@ app.MapGet("/api/log", (ImmichTaggerSettings settings, string path) =>
 
 app.MapPost("/api/dry-run", (ImmichTaggerSettings settings, ScanJobService jobs, ScanStartRequest request) =>
 {
-    return jobs.TryStart(settings, request, dryRun: true, out string message)
+    if (!TryNormalizeScanRequest(settings, request, out ScanStartRequest normalizedRequest, out string? error))
+    {
+        return Results.BadRequest(new { message = error });
+    }
+
+    return jobs.TryStart(settings, normalizedRequest, dryRun: true, out string message)
         ? Results.Accepted("/api/status", new { message })
         : Results.Conflict(new { message });
 });
 
 app.MapPost("/api/run", (ImmichTaggerSettings settings, ScanJobService jobs, ScanStartRequest request) =>
 {
-    return jobs.TryStart(settings, request, dryRun: false, out string message)
+    if (!TryNormalizeScanRequest(settings, request, out ScanStartRequest normalizedRequest, out string? error))
+    {
+        return Results.BadRequest(new { message = error });
+    }
+
+    return jobs.TryStart(settings, normalizedRequest, dryRun: false, out string message)
         ? Results.Accepted("/api/status", new { message })
         : Results.Conflict(new { message });
 });
@@ -92,6 +97,20 @@ app.MapPost("/api/cancel", (ScanJobService jobs) =>
     return jobs.Cancel(out string message)
         ? Results.Accepted("/api/status", new { message })
         : Results.NotFound(new { message });
+});
+
+app.MapPost("/api/pause", (ScanJobService jobs) =>
+{
+    return jobs.Pause(out string message)
+        ? Results.Accepted("/api/status", new { message })
+        : Results.Conflict(new { message });
+});
+
+app.MapPost("/api/resume", (ScanJobService jobs) =>
+{
+    return jobs.Resume(out string message)
+        ? Results.Accepted("/api/status", new { message })
+        : Results.Conflict(new { message });
 });
 
 app.Run();
@@ -117,6 +136,9 @@ static void ApplySettingsUpdate(ImmichTaggerSettings settings, ImmichTaggerSetti
     settings.FallbackOllamaUrl = CleanText(request.FallbackOllamaUrl, settings.FallbackOllamaUrl);
     settings.FallbackModel = CleanText(request.FallbackModel, settings.FallbackModel);
     settings.FallbackMaxImageSize = Math.Max(0, request.FallbackMaxImageSize);
+    settings.SyncImmich = request.SyncImmich;
+    settings.ImmichBaseUrl = CleanText(request.ImmichBaseUrl, settings.ImmichBaseUrl);
+    settings.ImmichApiKey = CleanText(request.ImmichApiKey, settings.ImmichApiKey);
 }
 
 static string CleanText(string? value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
@@ -150,12 +172,59 @@ static bool ValidatePathForRead(string requestedPath, IReadOnlyList<string> allo
     return false;
 }
 
-static bool IsHiddenOrInternalFolder(string directory)
+static bool TryValidateFolderPath(ImmichTaggerSettings settings, string requestedPath, out string fullPath, out string? error)
 {
-    string name = Path.GetFileName(directory);
-    return name.StartsWith(".", StringComparison.Ordinal)
-        || string.Equals(name, "@eaDir", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(name, ".Recycle.Bin", StringComparison.OrdinalIgnoreCase);
+    fullPath = string.Empty;
+
+    if (!ValidatePathForRead(requestedPath, [settings.PhotoRoot], out string candidatePath, out error))
+    {
+        return false;
+    }
+
+    if (!Directory.Exists(candidatePath))
+    {
+        error = $"Folder does not exist: {candidatePath}";
+        return false;
+    }
+
+    if (PhotoAiScanner.IsExcludedScanDirectoryPath(candidatePath, settings.PhotoRoot))
+    {
+        error = $"Folder is an internal/system folder and cannot be scanned: {candidatePath}";
+        return false;
+    }
+
+    fullPath = candidatePath;
+    return true;
+}
+
+static bool TryNormalizeScanRequest(ImmichTaggerSettings settings, ScanStartRequest request, out ScanStartRequest normalizedRequest, out string? error)
+{
+    try
+    {
+        string[] normalizedFolders = GetRequestedFolders(settings, request);
+        normalizedRequest = request with
+        {
+            FolderPath = normalizedFolders[0],
+            FolderPaths = normalizedFolders
+        };
+        error = null;
+        return true;
+    }
+    catch (Exception ex)
+    {
+        normalizedRequest = request;
+        error = ex.Message;
+        return false;
+    }
+}
+
+static string[] GetRequestedFolders(ImmichTaggerSettings settings, ScanStartRequest request)
+{
+    IEnumerable<string?> requestedFolders = request.FolderPaths is { Count: > 0 }
+        ? request.FolderPaths
+        : [string.IsNullOrWhiteSpace(request.FolderPath) ? settings.DefaultFolderPath : request.FolderPath];
+
+    return PhotoAiFolderSelection.NormalizeAndValidateSelectedFolders(requestedFolders, settings.PhotoRoot);
 }
 
 static string GetSettingsFilePath(ImmichTaggerSettings settings)
@@ -211,6 +280,9 @@ static void CopySettings(ImmichTaggerSettings source, ImmichTaggerSettings targe
     target.FallbackOllamaUrl = source.FallbackOllamaUrl;
     target.FallbackModel = source.FallbackModel;
     target.FallbackMaxImageSize = source.FallbackMaxImageSize;
+    target.SyncImmich = source.SyncImmich;
+    target.ImmichBaseUrl = source.ImmichBaseUrl;
+    target.ImmichApiKey = source.ImmichApiKey;
 }
 
 static JsonSerializerOptions CreateJsonOptions() => new()
@@ -224,19 +296,31 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 {
     string Encode(string? value) => HtmlEncoder.Default.Encode(value ?? string.Empty);
     string Checked(bool value) => value ? "checked" : string.Empty;
-    string folder = Encode(string.IsNullOrWhiteSpace(status.FolderPath) ? settings.DefaultFolderPath : status.FolderPath);
+    string[] selectedFolders = status.SelectedFolderPaths.Count > 0
+        ? status.SelectedFolderPaths.ToArray()
+        : [string.IsNullOrWhiteSpace(status.FolderPath) ? settings.DefaultFolderPath : status.FolderPath];
+    string folder = Encode(selectedFolders.FirstOrDefault() ?? settings.DefaultFolderPath);
     string message = Encode(status.Message);
     string error = Encode(status.Error ?? string.Empty);
     string recentLog = string.Join("\n", status.RecentLogLines.Select(HtmlEncoder.Default.Encode));
-    string running = status.IsRunning ? "Running" : "Idle";
+    string running = status.IsRunning ? (status.IsPaused ? "Paused" : "Running") : "Idle";
     string started = status.StartedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "n/a";
     string finished = status.FinishedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "n/a";
     string progress = RenderProgress(status.LastProgress);
     string summary = status.Summary is null ? string.Empty : $"<pre>{Encode(status.Summary.PlainText)}</pre>";
-    string? runLogPath = ExtractFirstLogPath(status.Summary?.PlainText);
+    string? runLogPath = status.RunLogPath ?? ExtractFirstLogPath(status.Summary?.PlainText);
     string openLogLink = string.IsNullOrWhiteSpace(runLogPath)
         ? "<span>No run log available yet.</span>"
         : $"<a id=\"openLogLink\" href=\"/api/log?path={Uri.EscapeDataString(runLogPath)}\" target=\"_blank\">Open Log</a>";
+    string selectedFoldersJson = JsonSerializer.Serialize(selectedFolders);
+    string scanButtonsDisabled = status.IsRunning ? "disabled" : string.Empty;
+    string activeScanButtonsDisabled = status.IsRunning ? string.Empty : "disabled";
+    string selectedFolderSummary = status.SelectedFolderPaths.Count switch
+    {
+        > 1 => $"{status.SelectedFolderPaths.Count} selected folders",
+        1 => Encode(status.SelectedFolderPaths[0]),
+        _ => Encode(selectedFolders[0])
+    };
 
     return $$"""
 <!doctype html>
@@ -254,13 +338,20 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     input { box-sizing: border-box; width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #c9b79c; font-size: 1rem; }
     input[type="checkbox"] { width: auto; margin-right: 8px; }
     button, a.button { border: 0; border-radius: 10px; padding: 11px 18px; margin: 8px 8px 0 0; color: #f7f1e8; background: #2f75b5; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-block; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
     button.stop { background: #b64234; }
+    button.pause { background: #d4a72c; color: #111; }
     button.secondary { background: #9b6f3d; }
     dl { display: grid; grid-template-columns: 180px 1fr; gap: 8px; }
     dt { font-weight: 700; }
     pre { white-space: pre-wrap; background: #211f1c; color: #f7f1e8; border-radius: 12px; padding: 16px; min-height: 100px; overflow: auto; }
     .error { color: #a1261d; font-weight: 700; }
     .folder-list button { display: block; width: 100%; text-align: left; background: #efe2cf; color: #111; margin: 6px 0; }
+    .folder-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin: 6px 0; }
+    .folder-row button { margin: 0; }
+    .selected-folders { margin: 12px 0; padding: 12px; border: 1px solid #d8c3a5; border-radius: 12px; background: #f3e8d7; }
+    .selected-folder-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #fffaf2; border: 1px solid #d8c3a5; border-radius: 10px; padding: 8px 10px; margin: 8px 0; }
+    .selected-folder-chip button { margin: 0; padding: 6px 10px; background: #9b6f3d; }
     .muted { color: #685f52; }
     .switches label { font-weight: 500; }
   </style>
@@ -277,13 +368,22 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       <div>
         <button class="secondary" onclick="browseFolders(document.getElementById('folderPath').value)">Browse this folder</button>
         <button class="secondary" onclick="browseFolders('{{Encode(settings.PhotoRoot)}}')">Browse /photos</button>
+        <button class="secondary" onclick="addSelectedFolder(document.getElementById('folderPath').value)">Add current folder</button>
       </div>
       <div id="folderBrowser" class="folder-list muted">Folder browser will appear here.</div>
+      <div class="selected-folders">
+        <strong>Selected folders for this run</strong>
+        <div id="selectedFoldersList" class="muted"></div>
+        <div>
+          <button class="secondary" type="button" onclick="clearSelectedFolders()">Clear selected folders</button>
+        </div>
+      </div>
       <label for="limit">Limit, optional</label>
       <input id="limit" type="number" min="0" value="{{settings.Limit?.ToString() ?? string.Empty}}" placeholder="0 = no limit">
-      <button onclick="startScan('/api/dry-run')">Dry Run</button>
-      <button onclick="startScan('/api/run')">Run Scan</button>
-      <button class="stop" onclick="cancelScan()">Stop</button>
+      <button {{scanButtonsDisabled}} onclick="startScan('/api/dry-run')">Dry Run</button>
+      <button {{scanButtonsDisabled}} onclick="startScan('/api/run')">Run Scan</button>
+      <button class="pause" {{activeScanButtonsDisabled}} onclick="togglePauseResume()">{{(status.IsPaused ? "Resume" : "Pause")}}</button>
+      <button class="stop" {{activeScanButtonsDisabled}} onclick="cancelScan()">Stop</button>
     </section>
 
     <section class="card">
@@ -292,11 +392,14 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         <dt>Message</dt><dd>{{message}}</dd>
         <dt>Started</dt><dd>{{started}}</dd>
         <dt>Finished</dt><dd>{{finished}}</dd>
+        <dt>Selected folders</dt><dd>{{selectedFolderSummary}}</dd>
+        <dt>Pause state</dt><dd>{{(status.IsPaused ? "Paused" : (status.IsRunning ? "Running" : "Idle"))}}</dd>
         <dt>Open Log</dt><dd>{{openLogLink}}</dd>
         <dt>Primary Ollama</dt><dd>{{Encode(settings.PrimaryOllamaUrl)}}</dd>
         <dt>Primary Model</dt><dd>{{Encode(settings.PrimaryModel)}}</dd>
         <dt>Max Image Size</dt><dd>{{settings.MaxImageSize}}</dd>
         <dt>Fallback</dt><dd>{{settings.FallbackEnabled}} / {{Encode(settings.FallbackModel)}}</dd>
+        <dt>Sync Immich</dt><dd>{{settings.SyncImmich}} / {{Encode(settings.ImmichBaseUrl)}}</dd>
       </dl>
       {{progress}}
       {{(string.IsNullOrWhiteSpace(error) ? string.Empty : $"<p class=\"error\">{error}</p>")}}
@@ -330,6 +433,10 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           <input id="fallbackModel" value="{{Encode(settings.FallbackModel)}}">
           <label for="fallbackMaxImageSize">Fallback Max Image Size</label>
           <input id="fallbackMaxImageSize" type="number" min="0" value="{{settings.FallbackMaxImageSize}}">
+          <label for="immichBaseUrl">Immich Base URL</label>
+          <input id="immichBaseUrl" value="{{Encode(settings.ImmichBaseUrl)}}">
+          <label for="immichApiKey">Immich API Key</label>
+          <input id="immichApiKey" type="password" value="{{Encode(settings.ImmichApiKey)}}" placeholder="Leave blank to keep current value or disable sync">
         </div>
         <div class="switches">
           <label><input id="recursive" type="checkbox" {{Checked(settings.Recursive)}}>Subfolders</label>
@@ -340,6 +447,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           <label><input id="dryRunDefault" type="checkbox" {{Checked(settings.DryRunDefault)}}>Dry run by default</label>
           <label><input id="overwriteSidecars" type="checkbox" {{Checked(settings.OverwriteSidecars)}}>Overwrite sidecars</label>
           <label><input id="fallbackEnabled" type="checkbox" {{Checked(settings.FallbackEnabled)}}>Fallback enabled</label>
+          <label><input id="syncImmich" type="checkbox" {{Checked(settings.SyncImmich)}}>Sync Immich after live scans</label>
           <button onclick="saveSettings()">Save Settings</button>
         </div>
       </div>
@@ -352,6 +460,8 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
   </main>
 
   <script>
+    let selectedFolders = {{selectedFoldersJson}};
+
     const numericValue = (id) => {
       const raw = document.getElementById(id).value;
       return raw === '' ? null : Number(raw);
@@ -359,6 +469,49 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
     const checkboxValue = (id) => document.getElementById(id).checked;
     const textValue = (id) => document.getElementById(id).value;
+
+    function dedupeFolders(paths) {
+      const seen = new Set();
+      const normalized = [];
+      for (const path of paths) {
+        const trimmed = (path || '').trim();
+        if (!trimmed) continue;
+        if (seen.has(trimmed)) continue;
+        seen.add(trimmed);
+        normalized.push(trimmed);
+      }
+      return normalized;
+    }
+
+    function renderSelectedFolders() {
+      selectedFolders = dedupeFolders(selectedFolders);
+      const host = document.getElementById('selectedFoldersList');
+      if (selectedFolders.length === 0) {
+        host.innerHTML = '<p>No folders selected yet. Use the folder browser or add the current folder.</p>';
+        return;
+      }
+
+      host.innerHTML = selectedFolders.map((path, index) => `
+        <div class="selected-folder-chip">
+          <span>${escapeHtml(path)}</span>
+          <button type="button" onclick="removeSelectedFolder(${index})">Remove</button>
+        </div>`).join('');
+    }
+
+    function addSelectedFolder(path) {
+      selectedFolders = dedupeFolders([...selectedFolders, path]);
+      renderSelectedFolders();
+    }
+
+    function removeSelectedFolder(index) {
+      selectedFolders.splice(index, 1);
+      renderSelectedFolders();
+    }
+
+    function clearSelectedFolders() {
+      selectedFolders = [];
+      renderSelectedFolders();
+    }
 
     async function saveSettings() {
       const response = await fetch('/api/settings', {
@@ -383,7 +536,10 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           fallbackEnabled: checkboxValue('fallbackEnabled'),
           fallbackOllamaUrl: textValue('fallbackOllamaUrl'),
           fallbackModel: textValue('fallbackModel'),
-          fallbackMaxImageSize: numericValue('fallbackMaxImageSize') ?? 0
+          fallbackMaxImageSize: numericValue('fallbackMaxImageSize') ?? 0,
+          syncImmich: checkboxValue('syncImmich'),
+          immichBaseUrl: textValue('immichBaseUrl'),
+          immichApiKey: textValue('immichApiKey')
         })
       });
       if (!response.ok) alert(await response.text());
@@ -401,19 +557,19 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       const data = await response.json();
       const lines = [];
       lines.push(`<p><strong>${data.path}</strong></p>`);
+      lines.push(`<div><button type="button" onclick="addSelectedFolder('${escapeJs(data.path)}')">Add this folder</button></div>`);
       if (data.parent) lines.push(`<button type="button" onclick="browseFolders('${escapeJs(data.parent)}')">.. parent</button>`);
       if (data.directories.length === 0) lines.push('<p>No child folders.</p>');
       for (const directory of data.directories) {
         const label = directory.split('/').filter(Boolean).pop() || directory;
-        lines.push(`<button type="button" onclick="selectFolder('${escapeJs(directory)}')">${escapeHtml(label)}</button>`);
+        lines.push(`<div class="folder-row"><button type="button" onclick="browseFolders('${escapeJs(directory)}')">Browse</button><span>${escapeHtml(label)}</span><button type="button" onclick="selectFolder('${escapeJs(directory)}')">Add</button></div>`);
       }
       browser.innerHTML = lines.join('');
     }
 
     function selectFolder(path) {
       document.getElementById('folderPath').value = path;
-      document.getElementById('defaultFolderPath').value = path;
-      browseFolders(path);
+      addSelectedFolder(path);
     }
 
     function escapeHtml(value) {
@@ -428,11 +584,19 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       const folderPath = document.getElementById('folderPath').value;
       const limitRaw = document.getElementById('limit').value;
       const limit = limitRaw ? Number(limitRaw) : null;
+      const folderPaths = dedupeFolders(selectedFolders);
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderPath, limit })
+        body: JSON.stringify({ folderPath, folderPaths, limit })
       });
+      if (!response.ok) alert(await response.text());
+      location.reload();
+    }
+
+    async function togglePauseResume() {
+      const endpoint = {{(status.IsPaused ? "'/api/resume'" : "'/api/pause'")}};
+      const response = await fetch(endpoint, { method: 'POST' });
       if (!response.ok) alert(await response.text());
       location.reload();
     }
@@ -443,6 +607,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       location.reload();
     }
 
+    renderSelectedFolders();
     browseFolders(document.getElementById('folderPath').value);
     setTimeout(() => location.reload(), 10000);
   </script>
@@ -500,6 +665,9 @@ public sealed record ImmichTaggerSettingsUpdate(
     bool FallbackEnabled,
     string? FallbackOllamaUrl,
     string? FallbackModel,
-    int FallbackMaxImageSize);
+    int FallbackMaxImageSize,
+    bool SyncImmich,
+    string? ImmichBaseUrl,
+    string? ImmichApiKey);
 
 public sealed record FolderBrowseResponse(string Path, string? Parent, IReadOnlyList<string> Directories);

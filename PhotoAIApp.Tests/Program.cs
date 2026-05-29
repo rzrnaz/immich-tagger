@@ -61,6 +61,17 @@ try
     {
     }
 
+    string internalThumbsFolder = Path.Combine(multiFolderRoot, "thumbs", "cache");
+    Directory.CreateDirectory(internalThumbsFolder);
+    try
+    {
+        PhotoAiFolderSelection.NormalizeAndValidateSelectedFolders([internalThumbsFolder], multiFolderRoot);
+        throw new InvalidOperationException("Expected Immich thumbs folders to be rejected as scan roots.");
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("internal/system folder", StringComparison.OrdinalIgnoreCase))
+    {
+    }
+
     string realPhoto = Path.Combine(folderA, "real.jpg");
     File.WriteAllText(realPhoto, "not a real jpeg but enough for enumeration tests");
     string immichThumbsFolder = Path.Combine(multiFolderRoot, "thumbs", "98cc9547-bd4a-46f7-886c-035094d1bc8f", "96", "5b");
@@ -575,6 +586,79 @@ Assert(serverProgramSource.Contains("SavePersistedSettings(settings)", StringCom
     "Docker server settings POST should write persisted settings for container restarts");
 Assert(serverProgramSource.Contains("LoadPersistedSettings(initialSettings)", StringComparison.Ordinal),
     "Docker server startup should reload persisted settings after applying environment defaults");
+Assert(serverProgramSource.Contains("TryNormalizeScanRequest", StringComparison.Ordinal),
+    "Docker server should validate and normalize requested scan roots before starting a background job");
+Assert(serverProgramSource.Contains("FolderPaths = normalizedFolders", StringComparison.Ordinal),
+    "Docker server scan request normalization should preserve a validated multi-folder selection");
+Assert(serverProgramSource.Contains("NormalizeAndValidateSelectedFolders", StringComparison.Ordinal),
+    "Docker server should validate multi-folder selections with the shared folder-selection helper");
+Assert(serverProgramSource.Contains("selectedFoldersList", StringComparison.Ordinal),
+    "Docker server home page should show the selected folder list for multi-folder runs");
+Assert(serverProgramSource.Contains("addSelectedFolder", StringComparison.Ordinal),
+    "Docker server folder browser should let the operator add folders into a selected-folder run list");
+Assert(serverProgramSource.Contains("body: JSON.stringify({ folderPath, folderPaths, limit })", StringComparison.Ordinal),
+    "Docker server scan POST payload should submit both the single-folder field and the selected multi-folder list");
+Assert(serverProgramSource.Contains("IsExcludedScanDirectoryPath(directory, settings.PhotoRoot)", StringComparison.Ordinal),
+    "Docker server folder browser should hide generated/internal directories using the same exclusion logic as the scanner");
+Assert(serverProgramSource.Contains("status.RunLogPath ?? ExtractFirstLogPath", StringComparison.Ordinal),
+    "Docker server home page should preserve the Open Log link after cancellation by keeping the discovered run log path");
+Assert(serverProgramSource.Contains("id=\"syncImmich\"", StringComparison.Ordinal),
+    "Docker server settings editor should expose a Sync Immich toggle to match the Windows workflow");
+Assert(serverProgramSource.Contains("id=\"immichBaseUrl\"", StringComparison.Ordinal),
+    "Docker server settings editor should expose the Immich base URL for post-run sidecar sync");
+Assert(serverProgramSource.Contains("id=\"immichApiKey\"", StringComparison.Ordinal),
+    "Docker server settings editor should expose the Immich API key for post-run sidecar sync");
+Assert(serverProgramSource.Contains("syncImmich: checkboxValue('syncImmich')", StringComparison.Ordinal),
+    "Docker server settings POST payload should include the Sync Immich toggle");
+Assert(serverProgramSource.Contains("immichApiKey: textValue('immichApiKey')", StringComparison.Ordinal),
+    "Docker server settings POST payload should include the Immich API key");
+Assert(serverProgramSource.Contains("/api/pause", StringComparison.Ordinal),
+    "Docker server should expose a pause endpoint for parity with the Windows pause control");
+Assert(serverProgramSource.Contains("/api/resume", StringComparison.Ordinal),
+    "Docker server should expose a resume endpoint for parity with the Windows pause control");
+Assert(serverProgramSource.Contains("togglePauseResume", StringComparison.Ordinal),
+    "Docker server home page should offer a pause/resume control");
+Assert(serverProgramSource.Contains("button class=\"pause\"", StringComparison.Ordinal),
+    "Docker server scan controls should render a dedicated pause/resume button");
+Assert(serverProgramSource.Contains("scanButtonsDisabled", StringComparison.Ordinal)
+    && serverProgramSource.Contains("activeScanButtonsDisabled", StringComparison.Ordinal),
+    "Docker server home page should disable start controls during an active scan and disable pause/stop controls while idle");
+
+string settingsSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Core", "ImmichTaggerSettings.cs"));
+Assert(settingsSource.Contains("[ConfigurationKeyName(\"SYNC_IMMICH\")]", StringComparison.Ordinal),
+    "Shared server settings should bind a Sync Immich environment variable");
+Assert(settingsSource.Contains("[ConfigurationKeyName(\"IMMICH_BASE_URL\")]", StringComparison.Ordinal),
+    "Shared server settings should bind an Immich base URL environment variable");
+Assert(settingsSource.Contains("[ConfigurationKeyName(\"IMMICH_API_KEY\")]", StringComparison.Ordinal),
+    "Shared server settings should bind an Immich API key environment variable");
+
+string scanJobServiceSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Server", "ScanJobService.cs"));
+Assert(scanJobServiceSource.Contains("SyncImmichSidecarMetadataAsync", StringComparison.Ordinal),
+    "Server scan service should implement post-run Immich sync behavior");
+Assert(scanJobServiceSource.Contains("GetSelectedFolders", StringComparison.Ordinal),
+    "Server scan service should normalize and de-duplicate selected folders before running a job");
+Assert(scanJobServiceSource.Contains("PhotoAiScanSummary.Combine(summaries)", StringComparison.Ordinal),
+    "Server scan service should combine per-folder summaries into one aggregate result for multi-folder runs");
+Assert(scanJobServiceSource.Contains("selected_folders=", StringComparison.Ordinal),
+    "Server multi-folder live runs should append an aggregate completion block to the run log");
+Assert(scanJobServiceSource.Contains("SelectedFolderPaths", StringComparison.Ordinal),
+    "Server status should retain the selected folder list for UI rendering");
+Assert(scanJobServiceSource.Contains("PhotoAiPauseController", StringComparison.Ordinal),
+    "Server scan service should create and wire a pause controller into server-side scans");
+Assert(scanJobServiceSource.Contains("public bool Pause(out string message)", StringComparison.Ordinal),
+    "Server scan service should support pausing an active scan");
+Assert(scanJobServiceSource.Contains("public bool Resume(out string message)", StringComparison.Ordinal),
+    "Server scan service should support resuming a paused scan");
+Assert(scanJobServiceSource.Contains("IsPaused = progress.Snapshot?.State == PhotoAiRunState.Paused", StringComparison.Ordinal),
+    "Server status should reflect paused progress snapshots so the web UI can show paused state");
+Assert(scanJobServiceSource.Contains("PauseController = pauseController", StringComparison.Ordinal),
+    "Server scan options should pass the active pause controller down to the shared scanner");
+Assert(scanJobServiceSource.Contains("/api/jobs/sidecar", StringComparison.Ordinal),
+    "Server Immich sync should target the Immich sidecar jobs API");
+Assert(scanJobServiceSource.Contains("Immich sync skipped: missing Immich API key.", StringComparison.Ordinal),
+    "Server Immich sync should skip cleanly when no Immich API key is configured");
+Assert(scanJobServiceSource.Contains("Live scan complete. Immich sync failed.", StringComparison.Ordinal),
+    "Server status should preserve a completed scan even when the follow-up Immich sync fails");
 
 string dockerfileSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "Dockerfile"));
 Assert(dockerfileSource.Contains("HEALTHCHECK", StringComparison.Ordinal)

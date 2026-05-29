@@ -43,7 +43,7 @@ public static class PhotoAiFolderSelection
                 throw new DirectoryNotFoundException($"Selected folder does not exist: {folder}");
             }
 
-            if (IsExcludedScanFolder(folder))
+            if (IsExcludedScanFolder(folder, normalizedSafetyRoot))
             {
                 throw new InvalidOperationException($"Selected folder is an internal/system folder and cannot be scanned: {folder}");
             }
@@ -62,15 +62,23 @@ public static class PhotoAiFolderSelection
         return Path.GetFullPath(path.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
-    private static bool IsExcludedScanFolder(string folderPath)
+    private static bool IsExcludedScanFolder(string folderPath, string? normalizedSafetyRoot)
     {
-        string[] parts = NormalizeDirectoryPath(folderPath).Split(
+        string normalizedFolderPath = NormalizeDirectoryPath(folderPath);
+        if (!string.IsNullOrWhiteSpace(normalizedSafetyRoot)
+            && PhotoAiScanner.IsExcludedScanDirectoryPath(normalizedFolderPath, normalizedSafetyRoot))
+        {
+            return true;
+        }
+
+        string[] parts = normalizedFolderPath.Split(
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
             StringSplitOptions.RemoveEmptyEntries);
 
         return parts.Any(part =>
             string.Equals(part, ".photoai", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(part, ".Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(part, "@eaDir", StringComparison.OrdinalIgnoreCase));
+            string.Equals(part, "@eaDir", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(part, "thumbs", StringComparison.OrdinalIgnoreCase));
     }
 }

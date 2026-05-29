@@ -15,7 +15,7 @@ services:
       IMMICH_TAGGER__PHOTO_ROOT: "/photos"
       IMMICH_TAGGER__CONFIG_ROOT: "/config"
       IMMICH_TAGGER__LOG_ROOT: "/config/logs"
-      IMMICH_TAGGER__PRIMARY_OLLAMA_URL: "http://192.168.1.8:11434"
+      IMMICH_TAGGER__PRIMARY_OLLAMA_URL: "http://192.168.1.4:11434"
       IMMICH_TAGGER__PRIMARY_MODEL: "qwen2.5vl:7b"
       IMMICH_TAGGER__MAX_IMAGE_SIZE: "0"
       IMMICH_TAGGER__FALLBACK_ENABLED: "true"
@@ -27,6 +27,9 @@ services:
       IMMICH_TAGGER__WRITE_XMP: "true"
       IMMICH_TAGGER__ADD_TAGS: "true"
       IMMICH_TAGGER__OVERWRITE_SIDECARS: "false"
+      IMMICH_TAGGER__SYNC_IMMICH: "false"
+      IMMICH_TAGGER__IMMICH_BASE_URL: "http://192.168.1.8:2283"
+      IMMICH_TAGGER__IMMICH_API_KEY: ""
     volumes:
       - /mnt/user/photos:/photos
       - /mnt/user/appdata/immich-tagger:/config
