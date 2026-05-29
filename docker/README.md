@@ -66,7 +66,7 @@ All configuration is handled via environment variables with the prefix `IMMICH_T
 
 ## Unraid Installation
 
-Use the included Unraid XML template to deploy. New builds should use the pinned published image tag `ghcr.io/rzrnaz/immich-tagger-public:v1.0.5-unraid1` rather than `latest`.
+Use the included Unraid XML template to deploy. New builds should use the pinned published image tag `ghcr.io/rzrnaz/immich-tagger-public:v1.0.6-unraid1` rather than `latest`.
 
 1. From Unraid's "Apps" tab
 2. Click "Add Docker"

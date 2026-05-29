@@ -64,7 +64,7 @@ docker run --rm \
   -v /mnt/user/appdata/immich-tagger:/config \
   -e IMMICH_TAGGER__PRIMARY_OLLAMA_URL=http://192.168.1.4:11434 \
   -e IMMICH_TAGGER__PRIMARY_MODEL=qwen2.5vl:7b \
-  ghcr.io/rzrnaz/immich-tagger-public:v1.0.5-unraid1
+  ghcr.io/rzrnaz/immich-tagger-public:v1.0.6-unraid1
 ```
 
 ## Getting Started

@@ -1,6 +1,6 @@
 services:
   immich-tagger:
-    image: ghcr.io/rzrnaz/immich-tagger-public:v1.0.5-unraid1
+    image: ghcr.io/rzrnaz/immich-tagger-public:v1.0.6-unraid1
     build:
       context: ..
       dockerfile: Dockerfile
