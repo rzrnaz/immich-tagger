@@ -401,16 +401,10 @@ public sealed class AdvancedSettingsForm : Form
 
     private static string[] NormalizeModelListForTarget(IEnumerable<string> discoveredModels, bool isFallback)
     {
-        IEnumerable<string> models = discoveredModels.Where(model => !string.IsNullOrWhiteSpace(model));
-        if (!isFallback)
-        {
-            models = models.Concat(PhotoAiDefaults.PreferredPrimaryModels);
-        }
-
-        return models
+        return discoveredModels
+            .Where(model => !string.IsNullOrWhiteSpace(model))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(model => Array.FindIndex(PhotoAiDefaults.PreferredPrimaryModels, preferred => string.Equals(preferred, model, StringComparison.OrdinalIgnoreCase)) is int index && index >= 0 ? index : int.MaxValue)
-            .ThenBy(model => model, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(model => model, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 

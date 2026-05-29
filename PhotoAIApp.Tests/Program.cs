@@ -581,8 +581,8 @@ Assert(advancedSettingsSource.Contains("_fallbackModelComboBox", StringCompariso
     "Advanced dialog should let fallback models be refreshed/selected from a dropdown");
 Assert(advancedSettingsSource.Contains("_fallbackMaxImageSizeNumeric", StringComparison.Ordinal),
     "Advanced dialog should expose a fallback-specific Max Image Size control");
-Assert(advancedSettingsSource.Contains("PreferredPrimaryModels", StringComparison.Ordinal),
-    "Advanced dialog should offer preferred Qwen2.5-VL model tags even when /api/tags is incomplete");
+Assert(!advancedSettingsSource.Contains("Concat(PhotoAiDefaults.PreferredPrimaryModels)", StringComparison.Ordinal),
+    "Advanced dialog should show only models actually returned by Ollama, without synthetic preferred entries");
 Assert(!advancedSettingsSource.Contains("BlockedFallbackModelNameFragments", StringComparison.Ordinal),
     "Advanced dialog should not hide installed fallback models in code; bad models should be removed from Ollama itself");
 Assert(mainFormSource.Contains("new RowStyle(SizeType.Absolute, 360)", StringComparison.Ordinal),
@@ -616,6 +616,8 @@ Assert(serverProgramSource.Contains("id=\"primaryModel\"", StringComparison.Ordi
     "Docker server settings editor should expose the primary model");
 Assert(serverProgramSource.Contains("id=\"primaryModelStatus\"", StringComparison.Ordinal),
     "Docker server settings editor should show primary model-refresh status near the model dropdown");
+Assert(!serverProgramSource.Contains("Concat(PhotoAiDefaults.PreferredPrimaryModels)", StringComparison.Ordinal),
+    "Docker server primary model discovery should show only models actually returned by Ollama, without synthetic preferred entries");
 Assert(serverProgramSource.Contains("id=\"fallbackEnabled\"", StringComparison.Ordinal),
     "Docker server settings editor should expose the fallback enable switch");
 Assert(serverProgramSource.Contains("id=\"fallbackPreset\"", StringComparison.Ordinal),
