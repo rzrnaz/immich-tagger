@@ -41,7 +41,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/rzrnaz/immich-tagger
+          images: ghcr.io/rzrnaz/immich-tagger-public
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
