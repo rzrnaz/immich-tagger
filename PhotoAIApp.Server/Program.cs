@@ -859,17 +859,26 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       }
 
       status.textContent = `Loading models from ${baseUrl}...`;
-      const response = await fetch(`/api/models?baseUrl=${encodeURIComponent(baseUrl)}&target=${isFallback ? 'fallback' : 'primary'}`);
-      if (!response.ok) {
-        const message = await response.text();
-        status.textContent = `Unable to load models from ${baseUrl}.`;
+
+      try {
+        const response = await fetch(`/api/models?baseUrl=${encodeURIComponent(baseUrl)}&target=${isFallback ? 'fallback' : 'primary'}`);
+        if (!response.ok) {
+          const message = await response.text();
+          status.textContent = `Unable to load models from ${baseUrl}. ${message}`;
+          if (showErrors) alert(message);
+          return;
+        }
+
+        const data = await response.json();
+        setSelectOptions(modelFieldId, data.models || [], defaultModel);
+        status.textContent = `${data.models.length} model(s) loaded from ${data.baseUrl}.`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        status.textContent = `Unable to load models from ${baseUrl}. ${message}`;
         if (showErrors) alert(message);
         return;
       }
 
-      const data = await response.json();
-      setSelectOptions(modelFieldId, data.models || [], defaultModel);
-      status.textContent = `${data.models.length} model(s) loaded from ${data.baseUrl}.`;
       if (isFallback) {
         refreshFallbackPresetSummary();
       }
@@ -995,7 +1004,9 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       }
     });
     document.getElementById('primaryOllamaUrl').addEventListener('change', () => scheduleModelRefresh('primary'));
+    document.getElementById('primaryOllamaUrl').addEventListener('blur', () => scheduleModelRefresh('primary'));
     document.getElementById('fallbackOllamaUrl').addEventListener('change', () => scheduleModelRefresh('fallback'));
+    document.getElementById('fallbackOllamaUrl').addEventListener('blur', () => scheduleModelRefresh('fallback'));
     ['primaryOllamaUrl', 'primaryModel', 'maxImageSize', 'fallbackEnabled', 'fallbackOllamaUrl', 'fallbackModel', 'fallbackMaxImageSize']
       .forEach(id => document.getElementById(id).addEventListener(id === 'fallbackEnabled' ? 'change' : 'input', refreshProfileSummary));
 

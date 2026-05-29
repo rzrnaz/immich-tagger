@@ -147,6 +147,7 @@ AssertEqual(PhotoAiModelProfileId.Custom, PhotoAiModelProfile.MatchPreset(custom
 AssertEqual(PhotoAiModelProfileId.HighQuality, PhotoAiModelProfile.MatchPreset(highQualityProfile), "Exact High Quality settings should match the High Quality preset");
 AssertEqual("http://10.0.0.5:11435", PhotoAiModelProfile.BuildBaseUrl("10.0.0.5", 11435), "Host/port helper should build Ollama base URLs");
 AssertEqual("http://localhost:11434", PhotoAiModelProfile.BuildBaseUrl("http://localhost:11434", 11434), "URL helper should preserve explicit URL input");
+AssertEqual("http://192.168.1.8:11434", PhotoAiModelProfile.BuildBaseUrl("192.168.1.8:11434", 11434), "Host:port input without a scheme should preserve the explicit Ollama port instead of appending the default port again");
 
 var persistedSettings = new PhotoAiGuiSettings
 {
@@ -693,6 +694,11 @@ Assert(serverProgramSource.Contains("applyFallbackPreset", StringComparison.Ordi
 Assert(serverProgramSource.Contains("scheduleModelRefresh", StringComparison.Ordinal)
     && serverProgramSource.Contains("refreshModelsForTarget", StringComparison.Ordinal),
     "Docker server home page should refresh available Ollama models when the endpoint changes");
+Assert(serverProgramSource.Contains("addEventListener('blur', () => scheduleModelRefresh('primary'))", StringComparison.Ordinal)
+    && serverProgramSource.Contains("addEventListener('blur', () => scheduleModelRefresh('fallback'))", StringComparison.Ordinal),
+    "Docker server should refresh Ollama models when an endpoint field loses focus after editing, not only on the initial page load");
+Assert(serverProgramSource.Contains("Unable to load models from ${baseUrl}. ${message}", StringComparison.Ordinal),
+    "Docker server should surface the actual model-discovery error near the endpoint field so stale model lists are easier to diagnose");
 Assert(serverProgramSource.Contains("<progress", StringComparison.Ordinal),
     "Docker server status panel should render a progress bar for richer live parity with Windows 1.39");
 Assert(serverProgramSource.Contains("Current file", StringComparison.Ordinal),

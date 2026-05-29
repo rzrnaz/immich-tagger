@@ -105,6 +105,16 @@ public sealed record PhotoAiModelProfile
             return NormalizeUrl(absoluteUri.ToString());
         }
 
+        if (Uri.TryCreate($"http://{trimmed}", UriKind.Absolute, out Uri? hostWithOptionalPortUri))
+        {
+            bool hasExplicitPort = hostWithOptionalPortUri.IsDefaultPort == false;
+            bool hasHost = !string.IsNullOrWhiteSpace(hostWithOptionalPortUri.Host);
+            if (hasHost && hasExplicitPort)
+            {
+                return NormalizeUrl(hostWithOptionalPortUri.ToString());
+            }
+        }
+
         trimmed = trimmed.TrimEnd('/');
         return $"http://{trimmed}:{port}";
     }
