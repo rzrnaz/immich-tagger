@@ -7,13 +7,13 @@
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/rzrnaz/PhotoAIApp</Support>
-  <Project>https://github.com/rzrnaz/PhotoAIApp</Project>
+  <Support>https://github.com/rzrnaz/immich-tagger</Support>
+  <Project>https://github.com/rzrnaz/immich-tagger</Project>
   <Overview>Immich Tagger scans photo folders, sends images to an Ollama vision model, and writes Immich-friendly XMP sidecars plus JSON diagnostics. It is designed for Unraid/Docker photo-library workflows with dry runs, retry/fallback model handling, and detailed run logs.</Overview>
   <Category>MediaApp:Photos Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/rzrnaz/PhotoAIApp/main/docker/unraid/immich-tagger.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/rzrnaz/PhotoAIApp/main/PhotoAIApp.Gui/Assets/PhotoAIApp.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/rzrnaz/immich-tagger/main/docker/unraid/immich-tagger.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/rzrnaz/immich-tagger/main/PhotoAIApp.Gui/Assets/PhotoAIApp.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
