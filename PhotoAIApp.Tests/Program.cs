@@ -656,9 +656,9 @@ Assert(serverProgramSource.Contains("status.IsRunning && status.SelectedFolderPa
     && serverProgramSource.Contains("JsonSerializer.Serialize(explicitSelectedFolders)", StringComparison.Ordinal),
     "Docker server should only seed explicit selected folders into the page while a scan is active, not persist old selections into idle startup");
 Assert(serverProgramSource.Contains("sessionStorage.getItem(selectedFoldersStorageKey)", StringComparison.Ordinal)
-    && serverProgramSource.Contains("selectedFoldersRestoreOnceKey", StringComparison.Ordinal)
-    && serverProgramSource.Contains("persistSelectedFolders(folderPaths, true)", StringComparison.Ordinal),
-    "Docker server web UI should preserve explicit selected folders only across the immediate dry-run/live-run reload path without making stale idle selections sticky forever");
+    && !serverProgramSource.Contains("selectedFoldersRestoreOnceKey", StringComparison.Ordinal)
+    && serverProgramSource.Contains("persistSelectedFolders(folderPaths);", StringComparison.Ordinal),
+    "Docker server web UI should retain explicit selected folders in browser session state until the operator explicitly removes them");
 Assert(serverProgramSource.Contains("document.getElementById('photoRoot').addEventListener('input', onPhotoRootChanged)", StringComparison.Ordinal)
     && serverProgramSource.Contains("getEffectivePhotoRoot", StringComparison.Ordinal),
     "Docker server scan-root summary should follow the configured /photos root instead of behaving like a user-selectable current folder field");

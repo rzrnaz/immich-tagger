@@ -566,7 +566,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
   <script>
     const selectedFoldersStorageKey = 'immichTagger.selectedFolders';
-    const selectedFoldersRestoreOnceKey = 'immichTagger.selectedFolders.restoreOnce';
     const photoRoot = '{{Encode(settings.PhotoRoot)}}';
     let selectedFolders = loadSelectedFolders();
     let currentFolderBrowserData = null;
@@ -574,33 +573,21 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     function loadSelectedFolders() {
       const serverSelectedFolders = dedupeFolders({{selectedFoldersJson}});
       if (serverSelectedFolders.length > 0) {
-        persistSelectedFolders(serverSelectedFolders, false);
+        persistSelectedFolders(serverSelectedFolders);
         return serverSelectedFolders;
       }
 
       try {
-        const shouldRestore = window.sessionStorage.getItem(selectedFoldersRestoreOnceKey) === 'true';
-        window.sessionStorage.removeItem(selectedFoldersRestoreOnceKey);
-        if (!shouldRestore) {
-          return [];
-        }
-
         const persisted = JSON.parse(window.sessionStorage.getItem(selectedFoldersStorageKey) || '[]');
         return Array.isArray(persisted) ? dedupeFolders(persisted) : [];
       } catch {
-        window.sessionStorage.removeItem(selectedFoldersRestoreOnceKey);
         return [];
       }
     }
 
-    function persistSelectedFolders(paths, restoreOnce = false) {
+    function persistSelectedFolders(paths) {
       const normalized = dedupeFolders(paths);
       window.sessionStorage.setItem(selectedFoldersStorageKey, JSON.stringify(normalized));
-      if (restoreOnce && normalized.length > 0) {
-        window.sessionStorage.setItem(selectedFoldersRestoreOnceKey, 'true');
-      } else {
-        window.sessionStorage.removeItem(selectedFoldersRestoreOnceKey);
-      }
     }
 
     const numericValue = (id) => {
@@ -867,7 +854,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       const limitRaw = document.getElementById('limit').value;
       const limit = limitRaw ? Number(limitRaw) : null;
       const folderPaths = dedupeFolders(selectedFolders);
-      persistSelectedFolders(folderPaths, true);
+      persistSelectedFolders(folderPaths);
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
