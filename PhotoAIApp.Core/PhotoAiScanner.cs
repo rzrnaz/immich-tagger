@@ -183,19 +183,18 @@ public sealed class PhotoAiScanner
             bool jsonExists = File.Exists(photoAiSidecarPath);
             bool xmpExists = File.Exists(xmpPath);
 
-            if (options.WriteJson && jsonExists && !options.Force)
+            PhotoAiSidecarWritePlan writePlan = PlanSidecarWrites(options, jsonExists, xmpExists);
+            if (options.WriteJson && jsonExists && !options.Force && !writePlan.ShouldAnalyze)
             {
                 summary.Skipped++;
                 Report(
                     progress,
                     "SKIP",
-                    $"SKIP {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: existing PhotoAI sidecar and Scan Existing is off: {Path.GetFileName(fullImagePath)}",
+                    $"SKIP {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: existing PhotoAI sidecar and Scan Existing is off, and no requested sidecar output needs rewriting: {Path.GetFileName(fullImagePath)}",
                     fullImagePath,
                     BuildProgressSnapshot(summary, options, PhotoAiRunState.Running, "Generating descriptions", imagePaths.Count));
                 continue;
             }
-
-            PhotoAiSidecarWritePlan writePlan = PlanSidecarWrites(options, jsonExists, xmpExists);
             if (writePlan.ShouldSkipWithoutAnalysis)
             {
                 summary.Skipped++;
@@ -427,19 +426,18 @@ public sealed class PhotoAiScanner
                 summary.ExistingXmpSidecars++;
             }
 
-            if (options.WriteJson && hasPhotoAiSidecar && !options.Force)
+            PhotoAiSidecarWritePlan writePlan = PlanSidecarWrites(options, hasPhotoAiSidecar, hasXmpSidecar);
+            if (options.WriteJson && hasPhotoAiSidecar && !options.Force && !writePlan.ShouldAnalyze)
             {
                 summary.Skipped++;
                 Report(
                     progress,
                     "WOULD SKIP",
-                    $"WOULD SKIP {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: existing PhotoAI sidecar and Force is off: {fullImagePath}",
+                    $"WOULD SKIP {FormatProgressLabel(options, displayIndex, imagePaths.Count, summary, includeCurrentFile: false)}: existing PhotoAI sidecar and Force is off, and no requested sidecar output needs rewriting: {fullImagePath}",
                     fullImagePath,
                     BuildProgressSnapshot(summary, options, PhotoAiRunState.DryRunning, "Dry run preview", imagePaths.Count));
                 continue;
             }
-
-            PhotoAiSidecarWritePlan writePlan = PlanSidecarWrites(options, hasPhotoAiSidecar, hasXmpSidecar);
             if (writePlan.ShouldSkipWithoutAnalysis)
             {
                 summary.Skipped++;

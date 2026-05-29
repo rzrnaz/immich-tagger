@@ -654,10 +654,12 @@ Assert(serverProgramSource.Contains("status.IsRunning && status.SelectedFolderPa
     && serverProgramSource.Contains("JsonSerializer.Serialize(explicitSelectedFolders)", StringComparison.Ordinal),
     "Docker server should only seed explicit selected folders into the page while a scan is active, not persist old selections into idle startup");
 Assert(serverProgramSource.Contains("sessionStorage.getItem(selectedFoldersStorageKey)", StringComparison.Ordinal)
-    && serverProgramSource.Contains("persistSelectedFolders(serverSelectedFolders)", StringComparison.Ordinal),
-    "Docker server web UI should preserve explicit selected folders across reloads so a verified dry run can be followed immediately by a live scan without silently falling back to /photos");
-Assert(serverProgramSource.Contains("document.getElementById('folderPath').addEventListener('input', onFolderPathChanged)", StringComparison.Ordinal),
-    "Docker server folder summary should refresh when the typed folder path changes");
+    && serverProgramSource.Contains("selectedFoldersRestoreOnceKey", StringComparison.Ordinal)
+    && serverProgramSource.Contains("persistSelectedFolders(folderPaths, true)", StringComparison.Ordinal),
+    "Docker server web UI should preserve explicit selected folders only across the immediate dry-run/live-run reload path without making stale idle selections sticky forever");
+Assert(serverProgramSource.Contains("document.getElementById('photoRoot').addEventListener('input', onPhotoRootChanged)", StringComparison.Ordinal)
+    && serverProgramSource.Contains("getEffectivePhotoRoot", StringComparison.Ordinal),
+    "Docker server scan-root summary should follow the configured /photos root instead of behaving like a user-selectable current folder field");
 Assert(serverProgramSource.Contains(": settings.PhotoRoot;", StringComparison.Ordinal),
     "Docker server idle startup should reset the folder field back to the /photos root instead of reusing the last scan folder");
 Assert(!serverProgramSource.Contains("id=\"dryRunDefault\"", StringComparison.Ordinal),
@@ -726,9 +728,14 @@ Assert(!serverProgramSource.Contains("Use only this folder", StringComparison.Or
     "Docker server folder browser should not expose a redundant 'Use only this folder' action when selecting one folder already achieves the same result");
 Assert(!serverProgramSource.Contains("id=\"defaultFolderPath\"", StringComparison.Ordinal),
     "Docker server settings should not expose a separate editable default folder field when idle startup must always begin at /photos");
+Assert(serverProgramSource.Contains("id=\"photoRootDisplay\"", StringComparison.Ordinal)
+    && !serverProgramSource.Contains("id=\"folderPath\"", StringComparison.Ordinal),
+    "Docker server start-scan UI should show the configured /photos root as display-only state instead of a selectable scan-root input that drifts with browsing");
 Assert(serverProgramSource.Contains("<link rel=\"icon\" href=\"/favicon.ico\"", StringComparison.Ordinal)
-    && serverProgramSource.Contains("app.MapGet(\"/favicon.ico\"", StringComparison.Ordinal),
-    "Docker server should serve the Windows app icon as the web page favicon");
+    && serverProgramSource.Contains("href=\"/icon.png\"", StringComparison.Ordinal)
+    && serverProgramSource.Contains("app.MapGet(\"/favicon.ico\"", StringComparison.Ordinal)
+    && serverProgramSource.Contains("app.MapGet(\"/icon.png\"", StringComparison.Ordinal),
+    "Docker server should serve the Windows app icon for the web page as both favicon and PNG icon assets");
 Assert(serverProgramSource.Contains("if ({{(status.IsRunning ? \"true\" : \"false\")}})", StringComparison.Ordinal),
     "Docker server home page should only auto-refresh while a scan is active so idle folder selections are not wiped during setup/testing");
 
@@ -847,6 +854,7 @@ try
             string sidecarPath = PhotoAiScanner.GetPhotoAiSidecarPath(imagePath);
             Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
             await File.WriteAllTextAsync(sidecarPath, "{}");
+            await File.WriteAllTextAsync(PhotoAiScanner.GetImmichXmpSidecarPath(imagePath), "<x:xmpmeta />");
         }
     }
 
@@ -860,8 +868,8 @@ try
             Force = false,
             WriteJson = true,
             WriteXmp = true,
-            OverwriteJson = true,
-            OverwriteXmp = true,
+            OverwriteJson = false,
+            OverwriteXmp = false,
             Limit = 3
         });
 
@@ -973,6 +981,7 @@ try
     string imagePath = Path.Combine(realRunRoot, "already-done.jpg");
     await File.WriteAllTextAsync(imagePath, "fake image content");
     await File.WriteAllTextAsync(PhotoAiScanner.GetPhotoAiSidecarPath(imagePath), "{}");
+    await File.WriteAllTextAsync(PhotoAiScanner.GetImmichXmpSidecarPath(imagePath), "<x:xmpmeta />");
 
     var progressItems = new List<PhotoAiScanProgress>();
     var summary = await new PhotoAiScanner().ScanFolderAsync(
@@ -988,7 +997,7 @@ try
         },
         new CollectingProgress<PhotoAiScanProgress>(progressItems));
 
-    AssertEqual(1, summary.Skipped, "Real run should skip an image with an existing PhotoAI sidecar when Force is off");
+    AssertEqual(1, summary.Skipped, "Real run should skip an image with existing PhotoAI JSON and XMP sidecars when Force is off and no requested output needs rewriting");
     Assert(progressItems.Any(item => item.Snapshot is { State: PhotoAiRunState.Running, FilesFinished: 1, SkippedFiles: 1, TotalFiles: 1 }),
         "Real run should emit a running snapshot when an image is skipped");
     AssertEqual(PhotoAiRunState.Completed, progressItems.Last(item => item.Snapshot is not null).Snapshot!.State,
@@ -997,6 +1006,40 @@ try
 finally
 {
     Directory.Delete(realRunRoot, recursive: true);
+}
+
+string overwriteXmpRoot = Path.Combine(Path.GetTempPath(), $"photoai-overwrite-xmp-tests-{Guid.NewGuid():N}");
+Directory.CreateDirectory(overwriteXmpRoot);
+try
+{
+    string imagePath = Path.Combine(overwriteXmpRoot, "needs-xmp-refresh.jpg");
+    await File.WriteAllTextAsync(imagePath, "fake image content");
+    await File.WriteAllTextAsync(PhotoAiScanner.GetPhotoAiSidecarPath(imagePath), "{}");
+    await File.WriteAllTextAsync(PhotoAiScanner.GetImmichXmpSidecarPath(imagePath), "<x:xmpmeta />");
+
+    PhotoAiScanSummary summary = await new PhotoAiScanner().ScanFolderAsync(
+        new PhotoAiScanOptions
+        {
+            FolderPath = overwriteXmpRoot,
+            SafetyRootPath = overwriteXmpRoot,
+            Recursive = false,
+            DryRun = true,
+            Force = false,
+            WriteJson = true,
+            WriteXmp = true,
+            OverwriteJson = true,
+            OverwriteXmp = true
+        });
+
+    AssertEqual(1, summary.ImagesFound, "Dry run should still count an image with existing PhotoAI and XMP sidecars when overwrite is enabled");
+    AssertEqual(1, summary.WouldProcess, "Overwrite sidecars should force a dry-run reprocess even if Scan Existing is off");
+    AssertEqual(1, summary.WouldWriteJsonSidecar, "Overwrite sidecars dry run should plan to rewrite the JSON sidecar");
+    AssertEqual(1, summary.WouldWriteXmpSidecar, "Overwrite sidecars dry run should plan to rewrite the XMP sidecar");
+    AssertEqual(0, summary.Skipped, "Overwrite sidecars dry run should not skip the image just because a PhotoAI sidecar already exists");
+}
+finally
+{
+    Directory.Delete(overwriteXmpRoot, recursive: true);
 }
 
 string pausedRunRoot = Path.Combine(Path.GetTempPath(), $"photoai-paused-progress-tests-{Guid.NewGuid():N}");

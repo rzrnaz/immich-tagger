@@ -22,6 +22,13 @@ app.MapGet("/favicon.ico", () =>
         ? Results.File(iconPath, "image/x-icon")
         : Results.NotFound();
 });
+app.MapGet("/icon.png", () =>
+{
+    string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "PhotoAIApp.png");
+    return System.IO.File.Exists(iconPath)
+        ? Results.File(iconPath, "image/png")
+        : Results.NotFound();
+});
 app.MapGet("/healthz", (ScanJobService jobs) => Results.Ok(new
 {
     status = "ok",
@@ -457,6 +464,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Immich Tagger</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/icon.png" sizes="256x256">
   <style>
     body { font-family: system-ui, Segoe UI, sans-serif; background: #f7f1e8; color: #111; margin: 0; }
     main { max-width: 1240px; margin: 0 auto; padding: 32px; }
@@ -510,14 +518,13 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
     <section class="card">
       <h2>Start a scan</h2>
-      <label for="folderPath">Folder under /photos</label>
-      <input id="folderPath" value="{{folder}}">
+      <label>Photo root</label>
+      <div id="photoRootDisplay" class="profile-summary">{{Encode(settings.PhotoRoot)}}</div>
       <div class="scan-actions">
-        <button class="secondary" type="button" onclick="browseFolders(document.getElementById('folderPath').value)">Browse this folder</button>
-        <button class="secondary" type="button" onclick="browseFolders('{{Encode(settings.PhotoRoot)}}')">Browse /photos</button>
-        <button class="secondary" type="button" onclick="addSelectedFolder(document.getElementById('folderPath').value)">Add current folder</button>
+        <button class="secondary" type="button" onclick="browseFolders(currentBrowsePath || getEffectivePhotoRoot())">Browse current folder</button>
+        <button class="secondary" type="button" onclick="browseFolders(getEffectivePhotoRoot())">Browse photo root</button>
       </div>
-      <p class="muted help-note">Pick one or more folders for this run. If nothing is selected, the typed folder still acts as the scan root.</p>
+      <p class="muted help-note">Browse under the configured photo root and add one or more folders for this run. If nothing is selected, the default scan root stays the photo root shown above.</p>
       <div id="folderBrowser" class="folder-list muted">Folder browser will appear here.</div>
       <div class="selected-folders">
         <div class="selected-folder-header">
@@ -526,7 +533,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         </div>
         <div id="selectedFoldersList" class="muted"></div>
         <div class="scan-actions">
-          <button class="secondary" type="button" onclick="addSelectedFolder(document.getElementById('folderPath').value)">Add typed path</button>
           <button class="secondary" type="button" onclick="clearSelectedFolders()">Clear selected folders</button>
         </div>
       </div>
@@ -564,7 +570,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
     <section class="card">
       <h2>Settings</h2>
-      <p class="muted">These values start from the Unraid template/environment defaults. Saving here writes /config/immich-tagger-settings.json so GUI edits survive container restarts. Update the Unraid template/container variables when you want to change the first-run defaults.</p>
+      <p class="muted">These values start from the Unraid template/environment defaults. Saving here writes /config/immich-tagger-settings.json so GUI edits survive container restarts. If startup values differ from the current template, the saved /config copy is winning. Update the Unraid template/container variables when you want to change the first-run defaults.</p>
       <div class="grid">
         <div>
           <label for="photoRoot">Photo root</label>
@@ -632,8 +638,11 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
   <script>
     const selectedFoldersStorageKey = 'immichTagger.selectedFolders';
+    const selectedFoldersRestoreOnceKey = 'immichTagger.selectedFolders.restoreOnce';
+    const photoRoot = '{{Encode(settings.PhotoRoot)}}';
     let selectedFolders = loadSelectedFolders();
     let currentFolderBrowserData = null;
+    let currentBrowsePath = photoRoot;
     const profilePresets = {{profilePresetsJson}};
     const fallbackPresets = {{fallbackPresetsJson}};
     const initialProfilePresetId = '{{currentProfileIdText}}';
@@ -641,27 +650,51 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     function loadSelectedFolders() {
       const serverSelectedFolders = dedupeFolders({{selectedFoldersJson}});
       if (serverSelectedFolders.length > 0) {
-        persistSelectedFolders(serverSelectedFolders);
+        persistSelectedFolders(serverSelectedFolders, false);
         return serverSelectedFolders;
       }
 
       try {
+        const shouldRestore = window.sessionStorage.getItem(selectedFoldersRestoreOnceKey) === 'true';
+        window.sessionStorage.removeItem(selectedFoldersRestoreOnceKey);
+        if (!shouldRestore) {
+          return [];
+        }
+
         const persisted = JSON.parse(window.sessionStorage.getItem(selectedFoldersStorageKey) || '[]');
         return Array.isArray(persisted) ? dedupeFolders(persisted) : [];
       } catch {
+        window.sessionStorage.removeItem(selectedFoldersRestoreOnceKey);
         return [];
       }
     }
 
-    function persistSelectedFolders(paths) {
+    function persistSelectedFolders(paths, restoreOnce = false) {
       const normalized = dedupeFolders(paths);
       window.sessionStorage.setItem(selectedFoldersStorageKey, JSON.stringify(normalized));
+      if (restoreOnce && normalized.length > 0) {
+        window.sessionStorage.setItem(selectedFoldersRestoreOnceKey, 'true');
+      } else {
+        window.sessionStorage.removeItem(selectedFoldersRestoreOnceKey);
+      }
     }
 
     const numericValue = (id) => {
       const raw = document.getElementById(id).value;
       return raw === '' ? null : Number(raw);
     };
+
+    function getEffectivePhotoRoot() {
+      const configured = (document.getElementById('photoRoot')?.value || photoRoot).trim();
+      return configured || photoRoot;
+    }
+
+    function updatePhotoRootDisplay() {
+      const display = document.getElementById('photoRootDisplay');
+      if (display) {
+        display.textContent = getEffectivePhotoRoot();
+      }
+    }
 
     const checkboxValue = (id) => document.getElementById(id).checked;
     const textValue = (id) => document.getElementById(id).value;
@@ -681,25 +714,22 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
     function renderSelectedFolders() {
       selectedFolders = dedupeFolders(selectedFolders);
-      persistSelectedFolders(selectedFolders);
+      persistSelectedFolders(selectedFolders, false);
+      updatePhotoRootDisplay();
       const host = document.getElementById('selectedFoldersList');
       const count = document.getElementById('selectedFolderCount');
       const summary = document.getElementById('statusSelectedFolderSummary');
-      const folderPathInput = document.getElementById('folderPath');
-      const typedPath = (document.getElementById('folderPath').value || '').trim();
-      if (selectedFolders.length > 0
-        && (!typedPath || typedPath === '{{Encode(settings.PhotoRoot)}}')
-        && folderPathInput) {
-        folderPathInput.value = selectedFolders[0];
-      }
       count.textContent = selectedFolders.length === 0
         ? 'No explicit folder selections yet'
         : `${selectedFolders.length} selected folder${selectedFolders.length === 1 ? '' : 's'}`;
       summary.textContent = selectedFolders.length > 1
         ? `${selectedFolders.length} selected folders`
-        : (selectedFolders[0] || typedPath || '{{Encode(settings.PhotoRoot)}}');
+        : (selectedFolders[0] || getEffectivePhotoRoot());
       if (selectedFolders.length === 0) {
-        host.innerHTML = '<p>No folders selected yet. Use the folder browser or add the current folder.</p>';
+        host.innerHTML = '<p>No folders selected yet. Use the folder browser to add one or more folders.</p>';
+        if (currentFolderBrowserData) {
+          renderFolderBrowser(currentFolderBrowserData);
+        }
         return;
       }
 
@@ -736,8 +766,14 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       renderSelectedFolders();
     }
 
-    function onFolderPathChanged() {
-      renderSelectedFolders();
+    function onPhotoRootChanged() {
+      updatePhotoRootDisplay();
+      if (selectedFolders.length === 0) {
+        const summary = document.getElementById('statusSelectedFolderSummary');
+        if (summary) {
+          summary.textContent = getEffectivePhotoRoot();
+        }
+      }
     }
 
     function findPresetById(profileId) {
@@ -965,6 +1001,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
     function renderFolderBrowser(data) {
       currentFolderBrowserData = data;
+      currentBrowsePath = data.path;
       const browser = document.getElementById('folderBrowser');
       const lines = [];
       lines.push(`<div class="folder-browser-toolbar">`);
@@ -996,7 +1033,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     }
 
     function selectFolder(path) {
-      document.getElementById('folderPath').value = path;
       addSelectedFolder(path);
     }
 
@@ -1009,10 +1045,11 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     }
 
     async function startScan(endpoint) {
-      const folderPath = document.getElementById('folderPath').value;
+      const folderPath = getEffectivePhotoRoot();
       const limitRaw = document.getElementById('limit').value;
       const limit = limitRaw ? Number(limitRaw) : null;
       const folderPaths = dedupeFolders(selectedFolders);
+      persistSelectedFolders(folderPaths, true);
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1035,7 +1072,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       location.reload();
     }
 
-    document.getElementById('folderPath').addEventListener('input', onFolderPathChanged);
+    document.getElementById('photoRoot').addEventListener('input', onPhotoRootChanged);
     document.getElementById('fallbackEnabled').addEventListener('change', () => {
       updateFallbackControlState();
       refreshProfileSummary();
@@ -1064,7 +1101,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     if (checkboxValue('fallbackEnabled')) {
       scheduleModelRefresh('fallback');
     }
-    browseFolders(document.getElementById('folderPath').value);
+    browseFolders(currentBrowsePath || getEffectivePhotoRoot());
     if ({{(status.IsRunning ? "true" : "false")}}) {
       setTimeout(() => location.reload(), 10000);
     }

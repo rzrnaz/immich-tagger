@@ -2,6 +2,7 @@
   <ItemGroup>
     <ProjectReference Include="..\PhotoAIApp.Core\PhotoAIApp.Core.csproj" />
     <Content Include="..\PhotoAIApp.Gui\Assets\PhotoAIApp.ico" Link="Assets\PhotoAIApp.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\PhotoAIApp.Gui\Assets\PhotoAIApp.png" Link="Assets\PhotoAIApp.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>
