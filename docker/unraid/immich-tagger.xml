@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Immich-Tagger</Name>
-  <Repository>ghcr.io/rzrnaz/immich-tagger:latest</Repository>
-  <Registry>https://github.com/rzrnaz/PhotoAIApp/pkgs/container/immich-tagger</Registry>
+  <Repository>ghcr.io/rzrnaz/immich-tagger-public:latest</Repository>
+  <Registry>https://github.com/rzrnaz/immich-tagger/pkgs/container/immich-tagger-public</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>

@@ -16,7 +16,7 @@ Use these names from this point forward:
 
 - Product name: `Immich Tagger`
 - Short slug: `immich-tagger`
-- Docker image target: `ghcr.io/rzrnaz/immich-tagger`
+- Docker image target: `ghcr.io/rzrnaz/immich-tagger-public`
 - Future Windows executable: `ImmichTagger.exe`
 - Unraid appdata path: `/mnt/user/appdata/immich-tagger`
 - Container config path: `/config`
@@ -455,7 +455,7 @@ dotnet run --project .\PhotoAIApp.Tests\PhotoAIApp.Tests.csproj
 
 - GitHub tag/release.
 - Windows ZIP/EXE if still desired.
-- Docker image `ghcr.io/rzrnaz/immich-tagger:<version>`.
+- Docker image `ghcr.io/rzrnaz/immich-tagger-public:<version>`.
 - Unraid XML template.
 - Checksums.
 
