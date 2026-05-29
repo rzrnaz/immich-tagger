@@ -340,6 +340,26 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         _ => Encode(selectedFolders[0])
     };
 
+    PhotoAiModelProfile currentProfile = BuildProfileFromSettings(settings);
+    PhotoAiModelProfileId currentProfileId = PhotoAiModelProfile.MatchPreset(currentProfile);
+    string currentProfileSummary = currentProfileId == PhotoAiModelProfileId.Custom
+        ? $"Custom | {currentProfile.Summary}"
+        : currentProfile.Summary;
+    string currentProfileIdText = currentProfileId.ToString();
+    string profilePresetsJson = JsonSerializer.Serialize(PhotoAiModelProfile.Presets.Select(profile => new
+    {
+        id = profile.ProfileId.ToString(),
+        displayName = profile.DisplayName,
+        summary = profile.Summary,
+        primaryOllamaUrl = profile.OllamaBaseUrl,
+        primaryModel = profile.Model,
+        maxImageSize = profile.MaxImageDimensionPixels,
+        fallbackEnabled = profile.ModelPreference == PhotoAiModelPreference.QwenPcWithUnraidFallback,
+        fallbackOllamaUrl = profile.FallbackOllamaBaseUrl,
+        fallbackModel = profile.FallbackModel,
+        fallbackMaxImageSize = profile.FallbackMaxImageDimensionPixels
+    }));
+
     return $$"""
 <!doctype html>
 <html lang="en">
@@ -349,29 +369,48 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
   <title>Immich Tagger</title>
   <style>
     body { font-family: system-ui, Segoe UI, sans-serif; background: #f7f1e8; color: #111; margin: 0; }
-    main { max-width: 1180px; margin: 0 auto; padding: 32px; }
+    main { max-width: 1240px; margin: 0 auto; padding: 32px; }
     .card { background: #fffaf2; border: 1px solid #d8c3a5; border-radius: 16px; padding: 20px; margin: 16px 0; box-shadow: 0 2px 10px #00000012; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
+    .scan-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
     label { display: block; font-weight: 650; margin: 12px 0 6px; }
-    input { box-sizing: border-box; width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #c9b79c; font-size: 1rem; }
+    input, select { box-sizing: border-box; width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #c9b79c; font-size: 1rem; background: #fff; }
     input[type="checkbox"] { width: auto; margin-right: 8px; }
     button, a.button { border: 0; border-radius: 10px; padding: 11px 18px; margin: 8px 8px 0 0; color: #f7f1e8; background: #2f75b5; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-block; }
     button:disabled { opacity: 0.55; cursor: not-allowed; }
     button.stop { background: #b64234; }
     button.pause { background: #d4a72c; color: #111; }
     button.secondary { background: #9b6f3d; }
+    button.ghost { background: #efe2cf; color: #111; }
     dl { display: grid; grid-template-columns: 180px 1fr; gap: 8px; }
     dt { font-weight: 700; }
     pre { white-space: pre-wrap; background: #211f1c; color: #f7f1e8; border-radius: 12px; padding: 16px; min-height: 100px; overflow: auto; }
     .error { color: #a1261d; font-weight: 700; }
-    .folder-list button { display: block; width: 100%; text-align: left; background: #efe2cf; color: #111; margin: 6px 0; }
-    .folder-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin: 6px 0; }
+    .folder-list { border: 1px solid #d8c3a5; border-radius: 12px; background: #f3e8d7; padding: 12px; margin-top: 12px; }
+    .folder-list button { width: auto; text-align: left; background: #efe2cf; color: #111; margin: 6px 8px 0 0; }
+    .folder-row { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; margin: 8px 0; }
     .folder-row button { margin: 0; }
+    .folder-browser-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
     .selected-folders { margin: 12px 0; padding: 12px; border: 1px solid #d8c3a5; border-radius: 12px; background: #f3e8d7; }
+    .selected-folder-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
     .selected-folder-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #fffaf2; border: 1px solid #d8c3a5; border-radius: 10px; padding: 8px 10px; margin: 8px 0; }
     .selected-folder-chip button { margin: 0; padding: 6px 10px; background: #9b6f3d; }
     .muted { color: #685f52; }
     .switches label { font-weight: 500; }
+    .help-note { margin-top: 8px; }
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 16px 0; }
+    .status-metric { background: #f3e8d7; border: 1px solid #d8c3a5; border-radius: 12px; padding: 12px; }
+    .status-metric .label { font-size: 0.9rem; color: #685f52; margin-bottom: 4px; }
+    .status-metric .value { font-size: 1.05rem; font-weight: 700; word-break: break-word; }
+    .status-progress { margin: 16px 0; padding: 14px; border-radius: 12px; background: #f3e8d7; border: 1px solid #d8c3a5; }
+    .status-progress progress { width: 100%; height: 22px; margin: 10px 0 14px; }
+    .profile-summary { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: #f3e8d7; border: 1px solid #d8c3a5; }
+    .settings-note { margin-top: 4px; }
+    @media (max-width: 720px) {
+      main { padding: 16px; }
+      dl { grid-template-columns: 1fr; }
+      .folder-row { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -383,43 +422,54 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       <h2>Start a scan</h2>
       <label for="folderPath">Folder under /photos</label>
       <input id="folderPath" value="{{folder}}">
-      <div>
-        <button class="secondary" onclick="browseFolders(document.getElementById('folderPath').value)">Browse this folder</button>
-        <button class="secondary" onclick="browseFolders('{{Encode(settings.PhotoRoot)}}')">Browse /photos</button>
-        <button class="secondary" onclick="addSelectedFolder(document.getElementById('folderPath').value)">Add current folder</button>
+      <div class="scan-actions">
+        <button class="secondary" type="button" onclick="browseFolders(document.getElementById('folderPath').value)">Browse this folder</button>
+        <button class="secondary" type="button" onclick="browseFolders('{{Encode(settings.PhotoRoot)}}')">Browse /photos</button>
+        <button class="secondary" type="button" onclick="addSelectedFolder(document.getElementById('folderPath').value)">Add current folder</button>
+        <button class="ghost" type="button" onclick="setCurrentFolderAsOnlySelection()">Use current folder only</button>
       </div>
+      <p class="muted help-note">Pick one or more folders for this run. If nothing is selected, the typed folder still acts as the scan root.</p>
       <div id="folderBrowser" class="folder-list muted">Folder browser will appear here.</div>
       <div class="selected-folders">
-        <strong>Selected folders for this run</strong>
+        <div class="selected-folder-header">
+          <strong>Selected folders for this run</strong>
+          <span id="selectedFolderCount" class="muted"></span>
+        </div>
         <div id="selectedFoldersList" class="muted"></div>
-        <div>
+        <div class="scan-actions">
+          <button class="secondary" type="button" onclick="addSelectedFolder(document.getElementById('folderPath').value)">Add typed path</button>
+          <button class="ghost" type="button" onclick="setCurrentFolderAsOnlySelection()">Use typed path only</button>
           <button class="secondary" type="button" onclick="clearSelectedFolders()">Clear selected folders</button>
         </div>
       </div>
       <label for="limit">Limit, optional</label>
       <input id="limit" type="number" min="0" value="{{settings.Limit?.ToString() ?? string.Empty}}" placeholder="0 = no limit">
-      <button {{scanButtonsDisabled}} onclick="startScan('/api/dry-run')">Dry Run</button>
-      <button {{scanButtonsDisabled}} onclick="startScan('/api/run')">Run Scan</button>
-      <button class="pause" {{activeScanButtonsDisabled}} onclick="togglePauseResume()">{{(status.IsPaused ? "Resume" : "Pause")}}</button>
-      <button class="stop" {{activeScanButtonsDisabled}} onclick="cancelScan()">Stop</button>
+      <div class="scan-actions">
+        <button {{scanButtonsDisabled}} onclick="startScan('/api/dry-run')">Dry Run</button>
+        <button {{scanButtonsDisabled}} onclick="startScan('/api/run')">Run Scan</button>
+        <button class="pause" {{activeScanButtonsDisabled}} onclick="togglePauseResume()">{{(status.IsPaused ? "Resume" : "Pause")}}</button>
+        <button class="stop" {{activeScanButtonsDisabled}} onclick="cancelScan()">Stop</button>
+      </div>
     </section>
 
     <section class="card">
       <h2>Status: {{running}}</h2>
+      <div class="status-grid">
+        <div class="status-metric"><div class="label">Message</div><div class="value">{{message}}</div></div>
+        <div class="status-metric"><div class="label">Selected folders</div><div class="value">{{selectedFolderSummary}}</div></div>
+        <div class="status-metric"><div class="label">Started</div><div class="value">{{started}}</div></div>
+        <div class="status-metric"><div class="label">Finished</div><div class="value">{{finished}}</div></div>
+        <div class="status-metric"><div class="label">Pause state</div><div class="value">{{(status.IsPaused ? "Paused" : (status.IsRunning ? "Running" : "Idle"))}}</div></div>
+        <div class="status-metric"><div class="label">Open Log</div><div class="value">{{openLogLink}}</div></div>
+      </div>
+      {{progress}}
       <dl>
-        <dt>Message</dt><dd>{{message}}</dd>
-        <dt>Started</dt><dd>{{started}}</dd>
-        <dt>Finished</dt><dd>{{finished}}</dd>
-        <dt>Selected folders</dt><dd>{{selectedFolderSummary}}</dd>
-        <dt>Pause state</dt><dd>{{(status.IsPaused ? "Paused" : (status.IsRunning ? "Running" : "Idle"))}}</dd>
-        <dt>Open Log</dt><dd>{{openLogLink}}</dd>
         <dt>Primary Ollama</dt><dd>{{Encode(settings.PrimaryOllamaUrl)}}</dd>
         <dt>Primary Model</dt><dd>{{Encode(settings.PrimaryModel)}}</dd>
-        <dt>Max Image Size</dt><dd>{{settings.MaxImageSize}}</dd>
-        <dt>Fallback</dt><dd>{{settings.FallbackEnabled}} / {{Encode(settings.FallbackModel)}}</dd>
+        <dt>Max Image Size</dt><dd>{{(settings.MaxImageSize <= 0 ? "Original/full-res" : settings.MaxImageSize.ToString())}}</dd>
+        <dt>Fallback</dt><dd>{{(settings.FallbackEnabled ? $"Enabled / {Encode(settings.FallbackModel)}" : "Disabled")}}</dd>
         <dt>Sync Immich</dt><dd>{{settings.SyncImmich}} / {{Encode(settings.ImmichBaseUrl)}}</dd>
       </dl>
-      {{progress}}
       {{(string.IsNullOrWhiteSpace(error) ? string.Empty : $"<p class=\"error\">{error}</p>")}}
       {{summary}}
     </section>
@@ -439,6 +489,15 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           <input id="defaultFolderPath" value="{{Encode(settings.DefaultFolderPath)}}">
         </div>
         <div>
+          <label for="profilePreset">Model preset</label>
+          <select id="profilePreset" onchange="applyProfilePreset(this.value)">
+            <option value="HighQuality"{{(currentProfileIdText == nameof(PhotoAiModelProfileId.HighQuality) ? " selected" : string.Empty)}}>High Quality - Qwen 7B full-res</option>
+            <option value="Balanced"{{(currentProfileIdText == nameof(PhotoAiModelProfileId.Balanced) ? " selected" : string.Empty)}}>Balanced - Qwen 7B 1440px</option>
+            <option value="Compatibility"{{(currentProfileIdText == nameof(PhotoAiModelProfileId.Compatibility) ? " selected" : string.Empty)}}>Compatibility - Unraid MiniCPM-V full-res</option>
+            <option value="Custom"{{(currentProfileIdText == nameof(PhotoAiModelProfileId.Custom) ? " selected" : string.Empty)}}>Custom</option>
+          </select>
+          <div id="profileSummary" class="profile-summary">{{Encode(currentProfileSummary)}}</div>
+          <p class="muted settings-note">Choose a preset like Windows 1.39, then fine-tune fields below if needed.</p>
           <label for="primaryOllamaUrl">Primary Ollama URL</label>
           <input id="primaryOllamaUrl" value="{{Encode(settings.PrimaryOllamaUrl)}}">
           <label for="primaryModel">Primary model</label>
@@ -479,6 +538,8 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
 
   <script>
     let selectedFolders = {{selectedFoldersJson}};
+    const profilePresets = {{profilePresetsJson}};
+    const initialProfilePresetId = '{{currentProfileIdText}}';
 
     const numericValue = (id) => {
       const raw = document.getElementById(id).value;
@@ -504,6 +565,10 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     function renderSelectedFolders() {
       selectedFolders = dedupeFolders(selectedFolders);
       const host = document.getElementById('selectedFoldersList');
+      const count = document.getElementById('selectedFolderCount');
+      count.textContent = selectedFolders.length === 0
+        ? 'No explicit folder selections yet'
+        : `${selectedFolders.length} selected folder${selectedFolders.length === 1 ? '' : 's'}`;
       if (selectedFolders.length === 0) {
         host.innerHTML = '<p>No folders selected yet. Use the folder browser or add the current folder.</p>';
         return;
@@ -512,12 +577,20 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       host.innerHTML = selectedFolders.map((path, index) => `
         <div class="selected-folder-chip">
           <span>${escapeHtml(path)}</span>
-          <button type="button" onclick="removeSelectedFolder(${index})">Remove</button>
+          <span>
+            <button type="button" onclick="useOnlyFolder('${escapeJs(path)}')">Use only this folder</button>
+            <button type="button" onclick="removeSelectedFolder(${index})">Remove</button>
+          </span>
         </div>`).join('');
     }
 
     function addSelectedFolder(path) {
       selectedFolders = dedupeFolders([...selectedFolders, path]);
+      renderSelectedFolders();
+    }
+
+    function addVisibleFolders(paths) {
+      selectedFolders = dedupeFolders([...selectedFolders, ...paths]);
       renderSelectedFolders();
     }
 
@@ -529,6 +602,68 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     function clearSelectedFolders() {
       selectedFolders = [];
       renderSelectedFolders();
+    }
+
+    function useOnlyFolder(path) {
+      document.getElementById('folderPath').value = path;
+      selectedFolders = dedupeFolders([path]);
+      renderSelectedFolders();
+    }
+
+    function setCurrentFolderAsOnlySelection() {
+      useOnlyFolder(document.getElementById('folderPath').value);
+    }
+
+    function findPresetById(profileId) {
+      return profilePresets.find(preset => preset.id === profileId) || null;
+    }
+
+    function determineProfilePreset() {
+      return profilePresets.find(preset =>
+        preset.primaryOllamaUrl.trim().toLowerCase() === textValue('primaryOllamaUrl').trim().toLowerCase()
+        && preset.primaryModel.trim().toLowerCase() === textValue('primaryModel').trim().toLowerCase()
+        && Number(preset.maxImageSize) === Number(numericValue('maxImageSize') ?? 0)
+        && Boolean(preset.fallbackEnabled) === checkboxValue('fallbackEnabled')
+        && preset.fallbackOllamaUrl.trim().toLowerCase() === textValue('fallbackOllamaUrl').trim().toLowerCase()
+        && preset.fallbackModel.trim().toLowerCase() === textValue('fallbackModel').trim().toLowerCase()
+        && Number(preset.fallbackMaxImageSize) === Number(numericValue('fallbackMaxImageSize') ?? 0)
+      ) || null;
+    }
+
+    function refreshProfileSummary() {
+      const matched = determineProfilePreset();
+      const presetSelect = document.getElementById('profilePreset');
+      const summary = document.getElementById('profileSummary');
+      if (matched) {
+        presetSelect.value = matched.id;
+        summary.textContent = matched.summary;
+      } else {
+        presetSelect.value = 'Custom';
+        summary.textContent = 'Custom | Target: edit the model fields below as needed.';
+      }
+    }
+
+    function applyProfilePreset(profileId) {
+      if (profileId === 'Custom') {
+        refreshProfileSummary();
+        return;
+      }
+
+      const preset = findPresetById(profileId);
+      if (!preset) {
+        refreshProfileSummary();
+        return;
+      }
+
+      document.getElementById('primaryOllamaUrl').value = preset.primaryOllamaUrl;
+      document.getElementById('primaryModel').value = preset.primaryModel;
+      document.getElementById('maxImageSize').value = preset.maxImageSize;
+      document.getElementById('fallbackEnabled').checked = preset.fallbackEnabled;
+      document.getElementById('fallbackOllamaUrl').value = preset.fallbackOllamaUrl;
+      document.getElementById('fallbackModel').value = preset.fallbackModel;
+      document.getElementById('fallbackMaxImageSize').value = preset.fallbackMaxImageSize;
+      document.getElementById('profileSummary').textContent = preset.summary;
+      document.getElementById('profilePreset').value = preset.id;
     }
 
     async function saveSettings() {
@@ -574,13 +709,20 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       }
       const data = await response.json();
       const lines = [];
-      lines.push(`<p><strong>${data.path}</strong></p>`);
-      lines.push(`<div><button type="button" onclick="addSelectedFolder('${escapeJs(data.path)}')">Add this folder</button></div>`);
+      lines.push(`<div class="folder-browser-toolbar">`);
+      lines.push(`<strong>${escapeHtml(data.path)}</strong>`);
+      lines.push(`<button type="button" onclick="addSelectedFolder('${escapeJs(data.path)}')">Add this folder</button>`);
+      lines.push(`<button type="button" onclick="useOnlyFolder('${escapeJs(data.path)}')">Use only this folder</button>`);
+      if (data.directories.length > 0) {
+        lines.push(`<button type="button" onclick="addVisibleFolders(${JSON.stringify(data.directories)})">Add all visible folders</button>`);
+      }
       if (data.parent) lines.push(`<button type="button" onclick="browseFolders('${escapeJs(data.parent)}')">.. parent</button>`);
+      lines.push(`</div>`);
       if (data.directories.length === 0) lines.push('<p>No child folders.</p>');
       for (const directory of data.directories) {
         const label = directory.split('/').filter(Boolean).pop() || directory;
-        lines.push(`<div class="folder-row"><button type="button" onclick="browseFolders('${escapeJs(directory)}')">Browse</button><span>${escapeHtml(label)}</span><button type="button" onclick="selectFolder('${escapeJs(directory)}')">Add</button></div>`);
+        const isSelected = selectedFolders.includes(directory);
+        lines.push(`<div class="folder-row"><button type="button" onclick="browseFolders('${escapeJs(directory)}')">Browse</button><span>${escapeHtml(label)}${isSelected ? ' • selected' : ''}</span><button type="button" onclick="selectFolder('${escapeJs(directory)}')">Add</button><button type="button" onclick="useOnlyFolder('${escapeJs(directory)}')">Use only this folder</button></div>`);
       }
       browser.innerHTML = lines.join('');
     }
@@ -625,7 +767,14 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       location.reload();
     }
 
+    ['primaryOllamaUrl', 'primaryModel', 'maxImageSize', 'fallbackEnabled', 'fallbackOllamaUrl', 'fallbackModel', 'fallbackMaxImageSize']
+      .forEach(id => document.getElementById(id).addEventListener(id === 'fallbackEnabled' ? 'change' : 'input', refreshProfileSummary));
+
     renderSelectedFolders();
+    refreshProfileSummary();
+    if (initialProfilePresetId !== 'Custom') {
+      document.getElementById('profilePreset').value = initialProfilePresetId;
+    }
     browseFolders(document.getElementById('folderPath').value);
     setTimeout(() => location.reload(), 10000);
   </script>
@@ -642,17 +791,55 @@ static string RenderProgress(PhotoAiScanProgress? progress)
     }
 
     string Encode(string? value) => HtmlEncoder.Default.Encode(value ?? string.Empty);
-    string percent = snapshot.ProgressFraction?.ToString("0") ?? "n/a";
+    string percentDisplay = snapshot.ProgressFraction?.ToString("0") ?? "0";
+    int progressValue = (int)Math.Round(snapshot.ProgressFraction ?? 0, MidpointRounding.AwayFromZero);
+    string currentFile = string.IsNullOrWhiteSpace(progress.ImagePath) ? "Waiting for next file..." : Encode(progress.ImagePath);
     return $"""
-      <dl>
-        <dt>Phase</dt><dd>{Encode(snapshot.Phase)}</dd>
-        <dt>Files</dt><dd>{snapshot.FilesFinished} / {snapshot.TotalFiles?.ToString() ?? "?"} ({percent}%)</dd>
-        <dt>Remaining</dt><dd>{Encode(snapshot.EstimatedRemainingDisplay)}</dd>
-        <dt>ETA</dt><dd>{Encode(snapshot.EstimatedFinishTimeDisplay)}</dd>
-        <dt>Retry</dt><dd>{snapshot.PrimaryRetryAttempts}</dd>
-        <dt>Fallback</dt><dd>{snapshot.FallbackAttempts}</dd>
-      </dl>
+      <div class="status-progress">
+        <div><strong>{Encode(snapshot.Phase)}</strong></div>
+        <progress id="scanProgress" max="100" value="{progressValue}"></progress>
+        <div class="status-grid">
+          <div class="status-metric"><div class="label">Files</div><div class="value">{snapshot.FilesFinished} / {snapshot.TotalFiles?.ToString() ?? "?"} ({percentDisplay}%)</div></div>
+          <div class="status-metric"><div class="label">Elapsed</div><div class="value">{FormatDuration(snapshot.Elapsed)}</div></div>
+          <div class="status-metric"><div class="label">Remaining</div><div class="value">{Encode(snapshot.EstimatedRemainingDisplay)}</div></div>
+          <div class="status-metric"><div class="label">ETA</div><div class="value">{Encode(snapshot.EstimatedFinishTimeDisplay)}</div></div>
+          <div class="status-metric"><div class="label">Retry</div><div class="value">{snapshot.PrimaryRetryAttempts}</div></div>
+          <div class="status-metric"><div class="label">Fallback</div><div class="value">{snapshot.FallbackAttempts}</div></div>
+          <div class="status-metric"><div class="label">Current file</div><div class="value">{currentFile}</div></div>
+          <div class="status-metric"><div class="label">Current file event</div><div class="value">{Encode(progress.EventName)} — {Encode(progress.Message)}</div></div>
+        </div>
+      </div>
 """;
+}
+
+static PhotoAiModelProfile BuildProfileFromSettings(ImmichTaggerSettings settings)
+{
+    return new PhotoAiModelProfile
+    {
+        ProfileId = PhotoAiModelProfileId.Custom,
+        DisplayName = "Custom",
+        OllamaBaseUrl = settings.PrimaryOllamaUrl,
+        Model = settings.PrimaryModel,
+        MaxImageDimensionPixels = settings.MaxImageSize,
+        ModelPreference = settings.FallbackEnabled
+            ? PhotoAiModelPreference.QwenPcWithUnraidFallback
+            : PhotoAiModelPreference.PrimaryOnly,
+        FallbackOllamaBaseUrl = settings.FallbackOllamaUrl,
+        FallbackModel = settings.FallbackModel,
+        FallbackMaxImageDimensionPixels = settings.FallbackMaxImageSize
+    };
+}
+
+static string FormatDuration(TimeSpan duration)
+{
+    if (duration < TimeSpan.Zero)
+    {
+        duration = TimeSpan.Zero;
+    }
+
+    return duration.TotalHours >= 1
+        ? $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}"
+        : $"{duration.Minutes:00}:{duration.Seconds:00}";
 }
 
 static string? ExtractFirstLogPath(string? runLogPath)

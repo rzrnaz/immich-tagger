@@ -661,6 +661,22 @@ Assert(serverProgramSource.Contains("button class=\"pause\"", StringComparison.O
 Assert(serverProgramSource.Contains("scanButtonsDisabled", StringComparison.Ordinal)
     && serverProgramSource.Contains("activeScanButtonsDisabled", StringComparison.Ordinal),
     "Docker server home page should disable start controls during an active scan and disable pause/stop controls while idle");
+Assert(serverProgramSource.Contains("id=\"profilePreset\"", StringComparison.Ordinal),
+    "Docker server settings editor should expose a model preset/profile picker for Windows 1.39 parity");
+Assert(serverProgramSource.Contains("id=\"profileSummary\"", StringComparison.Ordinal),
+    "Docker server settings editor should show a human-readable preset/profile summary like the Windows app");
+Assert(serverProgramSource.Contains("applyProfilePreset", StringComparison.Ordinal),
+    "Docker server home page should apply model preset settings from the web UI without manual field editing");
+Assert(serverProgramSource.Contains("<progress", StringComparison.Ordinal),
+    "Docker server status panel should render a progress bar for richer live parity with Windows 1.39");
+Assert(serverProgramSource.Contains("Current file", StringComparison.Ordinal),
+    "Docker server status panel should expose the current file for richer live scan visibility");
+Assert(serverProgramSource.Contains("selectedFolderCount", StringComparison.Ordinal),
+    "Docker server folder selection UI should show a selected-folder count summary");
+Assert(serverProgramSource.Contains("addVisibleFolders", StringComparison.Ordinal),
+    "Docker server folder browser should support quickly adding all currently visible child folders");
+Assert(serverProgramSource.Contains("Use only this folder", StringComparison.Ordinal),
+    "Docker server folder browser should support quickly replacing the current selection with one folder");
 
 string settingsSource = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "PhotoAIApp.Core", "ImmichTaggerSettings.cs"));
 Assert(settingsSource.Contains("[ConfigurationKeyName(\"SYNC_IMMICH\")]", StringComparison.Ordinal),
