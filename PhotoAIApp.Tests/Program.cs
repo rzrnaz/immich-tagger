@@ -620,8 +620,8 @@ Assert(!serverProgramSource.Contains("Concat(PhotoAiDefaults.PreferredPrimaryMod
     "Docker server primary model discovery should show only models actually returned by Ollama, without synthetic preferred entries");
 Assert(serverProgramSource.Contains("id=\"fallbackEnabled\"", StringComparison.Ordinal),
     "Docker server settings editor should expose the fallback enable switch");
-Assert(serverProgramSource.Contains("id=\"fallbackPreset\"", StringComparison.Ordinal),
-    "Docker server settings editor should expose fallback-server preset shortcuts for the Unraid GPU path");
+Assert(!serverProgramSource.Contains("id=\"fallbackPreset\"", StringComparison.Ordinal),
+    "Docker server settings editor should not expose fallback presets when model choices must come only from live-discovered endpoint models");
 Assert(serverProgramSource.Contains("id=\"fallbackModelStatus\"", StringComparison.Ordinal),
     "Docker server settings editor should show fallback model-refresh status near the fallback model dropdown");
 Assert(serverProgramSource.Contains("id=\"overwriteSidecars\"", StringComparison.Ordinal),
@@ -697,14 +697,20 @@ Assert(serverProgramSource.Contains("class=\"pause\" {{scanButtonsDisabled}} onc
 Assert(serverProgramSource.Contains("scanButtonsDisabled", StringComparison.Ordinal)
     && serverProgramSource.Contains("activeScanButtonsDisabled", StringComparison.Ordinal),
     "Docker server home page should disable start controls during an active scan and disable pause/stop controls while idle");
-Assert(serverProgramSource.Contains("id=\"profilePreset\"", StringComparison.Ordinal),
-    "Docker server settings editor should expose a model preset/profile picker for Windows 1.39 parity");
-Assert(serverProgramSource.Contains("id=\"profileSummary\"", StringComparison.Ordinal),
-    "Docker server settings editor should show a human-readable preset/profile summary like the Windows app");
-Assert(serverProgramSource.Contains("applyProfilePreset", StringComparison.Ordinal),
-    "Docker server home page should apply model preset settings from the web UI without manual field editing");
-Assert(serverProgramSource.Contains("applyFallbackPreset", StringComparison.Ordinal),
-    "Docker server home page should apply fallback-server presets without manual field editing");
+Assert(!serverProgramSource.Contains("id=\"profilePreset\"", StringComparison.Ordinal),
+    "Docker server settings editor should not expose a model preset/profile picker when operators must choose live endpoint models directly");
+Assert(!serverProgramSource.Contains("id=\"profileSummary\"", StringComparison.Ordinal),
+    "Docker server settings editor should not expose preset summaries once presets are removed");
+Assert(!serverProgramSource.Contains("applyProfilePreset", StringComparison.Ordinal),
+    "Docker server home page should not include primary preset-application logic once presets are removed");
+Assert(!serverProgramSource.Contains("applyFallbackPreset", StringComparison.Ordinal),
+    "Docker server home page should not include fallback preset-application logic once presets are removed");
+Assert(!serverProgramSource.Contains("Choose a preset", StringComparison.Ordinal),
+    "Docker server settings help text should not reference presets after preset removal");
+Assert(!serverProgramSource.Contains("Balanced - Unraid MiniCPM-V 1440px", StringComparison.Ordinal)
+    && !serverProgramSource.Contains("Balanced - Unraid Qwen 7B 1440px", StringComparison.Ordinal)
+    && !serverProgramSource.Contains("Compatibility - Unraid MiniCPM-V full-res", StringComparison.Ordinal),
+    "Docker server settings should not advertise canned fallback model choices after preset removal");
 Assert(serverProgramSource.Contains("scheduleModelRefresh", StringComparison.Ordinal)
     && serverProgramSource.Contains("refreshModelsForTarget", StringComparison.Ordinal),
     "Docker server home page should refresh available Ollama models when the endpoint changes");
@@ -713,6 +719,9 @@ Assert(serverProgramSource.Contains("addEventListener('blur', () => scheduleMode
     "Docker server should refresh Ollama models when an endpoint field loses focus after editing, not only on the initial page load");
 Assert(serverProgramSource.Contains("Unable to load models from ${baseUrl}. ${message}", StringComparison.Ordinal),
     "Docker server should surface the actual model-discovery error near the endpoint field so stale model lists are easier to diagnose");
+Assert(serverProgramSource.Contains("function setSelectOptions(selectId, models, preferredModel, includeMissingValue = false)", StringComparison.Ordinal)
+    && serverProgramSource.Contains("Saved selection was not returned by that endpoint.", StringComparison.Ordinal),
+    "Docker server live model refresh should keep the dropdown truthful by not padding missing models back into the discovered list");
 Assert(serverProgramSource.Contains("NormalizeConfiguredOllamaBaseUrl(request.PrimaryOllamaUrl, settings.PrimaryOllamaUrl)", StringComparison.Ordinal)
     && serverProgramSource.Contains("NormalizeConfiguredOllamaBaseUrl(request.FallbackOllamaUrl, settings.FallbackOllamaUrl)", StringComparison.Ordinal),
     "Docker server settings saves should normalize primary and fallback Ollama URLs so new builds persist canonical endpoint values");

@@ -400,56 +400,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         _ => Encode(currentFolder)
     };
 
-    PhotoAiModelProfile currentProfile = BuildProfileFromSettings(settings);
-    PhotoAiModelProfileId currentProfileId = PhotoAiModelProfile.MatchPreset(currentProfile);
-    string currentProfileSummary = currentProfileId == PhotoAiModelProfileId.Custom
-        ? $"Custom | {currentProfile.Summary}"
-        : currentProfile.Summary;
-    string currentProfileIdText = currentProfileId.ToString();
-    string fallbackPresetId = string.Equals(currentProfile.FallbackOllamaBaseUrl, PhotoAiDefaults.UnraidOllamaBaseUrl, StringComparison.OrdinalIgnoreCase)
-        && string.Equals(currentProfile.FallbackModel, PhotoAiDefaults.QwenPcModel, StringComparison.OrdinalIgnoreCase)
-        && currentProfile.FallbackMaxImageDimensionPixels == PhotoAiDefaults.QwenMaxImageDimensionPixels
-            ? "Balanced"
-            : string.Equals(currentProfile.FallbackOllamaBaseUrl, PhotoAiDefaults.UnraidOllamaBaseUrl, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(currentProfile.FallbackModel, PhotoAiDefaults.UnraidModel, StringComparison.OrdinalIgnoreCase)
-                && currentProfile.FallbackMaxImageDimensionPixels == PhotoAiDefaults.UnraidMaxImageDimensionPixels
-                    ? "Compatibility"
-                    : "Custom";
-    string profilePresetsJson = JsonSerializer.Serialize(PhotoAiModelProfile.Presets.Select(profile => new
-    {
-        id = profile.ProfileId.ToString(),
-        displayName = profile.DisplayName,
-        summary = profile.Summary,
-        primaryOllamaUrl = profile.OllamaBaseUrl,
-        primaryModel = profile.Model,
-        maxImageSize = profile.MaxImageDimensionPixels,
-        fallbackEnabled = profile.ModelPreference == PhotoAiModelPreference.QwenPcWithUnraidFallback,
-        fallbackOllamaUrl = profile.FallbackOllamaBaseUrl,
-        fallbackModel = profile.FallbackModel,
-        fallbackMaxImageSize = profile.FallbackMaxImageDimensionPixels
-    }));
-    string fallbackPresetsJson = JsonSerializer.Serialize(new[]
-    {
-        new
-        {
-            id = "Balanced",
-            displayName = "Balanced - Unraid Qwen 7B 1440px",
-            summary = "Fallback target: 192.168.1.8:11434 | Model: qwen2.5vl:7b | Max Image Size: 1440px",
-            fallbackOllamaUrl = PhotoAiDefaults.UnraidOllamaBaseUrl,
-            fallbackModel = PhotoAiDefaults.QwenPcModel,
-            fallbackMaxImageSize = PhotoAiDefaults.QwenMaxImageDimensionPixels
-        },
-        new
-        {
-            id = "Compatibility",
-            displayName = "Compatibility - Unraid MiniCPM-V full-res",
-            summary = "Fallback target: 192.168.1.8:11434 | Model: minicpm-v:latest | Max Image Size: Original/full-res",
-            fallbackOllamaUrl = PhotoAiDefaults.UnraidOllamaBaseUrl,
-            fallbackModel = PhotoAiDefaults.UnraidModel,
-            fallbackMaxImageSize = PhotoAiDefaults.UnraidMaxImageDimensionPixels
-        }
-    });
-
     return $$"""
 <!doctype html>
 <html lang="en">
@@ -575,29 +525,13 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
           <input id="logRoot" value="{{Encode(settings.LogRoot)}}">
         </div>
         <div>
-          <label for="profilePreset">Model preset</label>
-          <select id="profilePreset" onchange="applyProfilePreset(this.value)">
-            <option value="HighQuality"{{(currentProfileIdText == nameof(PhotoAiModelProfileId.HighQuality) ? " selected" : string.Empty)}}>High Quality - Qwen 7B full-res</option>
-            <option value="Balanced"{{(currentProfileIdText == nameof(PhotoAiModelProfileId.Balanced) ? " selected" : string.Empty)}}>Balanced - Qwen 7B 1440px</option>
-            <option value="Compatibility"{{(currentProfileIdText == nameof(PhotoAiModelProfileId.Compatibility) ? " selected" : string.Empty)}}>Compatibility - Unraid MiniCPM-V full-res</option>
-            <option value="Custom"{{(currentProfileIdText == nameof(PhotoAiModelProfileId.Custom) ? " selected" : string.Empty)}}>Custom</option>
-          </select>
-          <div id="profileSummary" class="profile-summary">{{Encode(currentProfileSummary)}}</div>
-          <p class="muted settings-note">Choose a preset like Windows 1.39, then fine-tune fields below if needed.</p>
           <label for="primaryOllamaUrl">Primary Ollama URL</label>
           <input id="primaryOllamaUrl" value="{{Encode(settings.PrimaryOllamaUrl)}}">
           <label for="primaryModel">Primary model</label>
           <select id="primaryModel"><option selected>{{Encode(settings.PrimaryModel)}}</option></select>
-          <p id="primaryModelStatus" class="muted settings-note">Change the primary Ollama URL, then pick from the refreshed model dropdown.</p>
+          <p id="primaryModelStatus" class="muted settings-note">Change the primary Ollama URL, then pick from the refreshed live model dropdown.</p>
           <label for="maxImageSize">Max Image Size</label>
           <input id="maxImageSize" type="number" min="0" value="{{settings.MaxImageSize}}">
-          <label for="fallbackPreset">Fallback preset</label>
-          <select id="fallbackPreset" onchange="applyFallbackPreset(this.value)">
-            <option value="Balanced"{{(fallbackPresetId == "Balanced" ? " selected" : string.Empty)}}>Balanced - Unraid Qwen 7B 1440px</option>
-            <option value="Compatibility"{{(fallbackPresetId == "Compatibility" ? " selected" : string.Empty)}}>Compatibility - Unraid MiniCPM-V full-res</option>
-            <option value="Custom"{{(fallbackPresetId == "Custom" ? " selected" : string.Empty)}}>Custom</option>
-          </select>
-          <p id="fallbackPresetSummary" class="muted settings-note">Balanced and Compatibility are the fallback-server shortcuts for the Unraid GPU path.</p>
           <label for="fallbackOllamaUrl">Fallback Ollama URL</label>
           <input id="fallbackOllamaUrl" value="{{Encode(settings.FallbackOllamaUrl)}}">
           <label for="fallbackModel">Fallback model</label>
@@ -637,10 +571,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     let selectedFolders = loadSelectedFolders();
     let currentFolderBrowserData = null;
     let currentBrowsePath = photoRoot;
-    const profilePresets = {{profilePresetsJson}};
-    const fallbackPresets = {{fallbackPresetsJson}};
-    const initialProfilePresetId = '{{currentProfileIdText}}';
-
     function loadSelectedFolders() {
       const serverSelectedFolders = dedupeFolders({{selectedFoldersJson}});
       if (serverSelectedFolders.length > 0) {
@@ -770,117 +700,12 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       }
     }
 
-    function findPresetById(profileId) {
-      return profilePresets.find(preset => preset.id === profileId) || null;
-    }
-
-    function findFallbackPresetById(profileId) {
-      return fallbackPresets.find(preset => preset.id === profileId) || null;
-    }
-
-    function determineProfilePreset() {
-      return profilePresets.find(preset =>
-        preset.primaryOllamaUrl.trim().toLowerCase() === textValue('primaryOllamaUrl').trim().toLowerCase()
-        && preset.primaryModel.trim().toLowerCase() === textValue('primaryModel').trim().toLowerCase()
-        && Number(preset.maxImageSize) === Number(numericValue('maxImageSize') ?? 0)
-        && Boolean(preset.fallbackEnabled) === checkboxValue('fallbackEnabled')
-        && preset.fallbackOllamaUrl.trim().toLowerCase() === textValue('fallbackOllamaUrl').trim().toLowerCase()
-        && preset.fallbackModel.trim().toLowerCase() === textValue('fallbackModel').trim().toLowerCase()
-        && Number(preset.fallbackMaxImageSize) === Number(numericValue('fallbackMaxImageSize') ?? 0)
-      ) || null;
-    }
-
-    function refreshProfileSummary() {
-      const matched = determineProfilePreset();
-      const presetSelect = document.getElementById('profilePreset');
-      const summary = document.getElementById('profileSummary');
-      if (matched) {
-        presetSelect.value = matched.id;
-        summary.textContent = matched.summary;
-      } else {
-        presetSelect.value = 'Custom';
-        summary.textContent = 'Custom | Target: edit the model fields below as needed.';
-      }
-
-      refreshFallbackPresetSummary();
-    }
-
-    function applyProfilePreset(profileId) {
-      if (profileId === 'Custom') {
-        refreshProfileSummary();
-        return;
-      }
-
-      const preset = findPresetById(profileId);
-      if (!preset) {
-        refreshProfileSummary();
-        return;
-      }
-
-      document.getElementById('primaryOllamaUrl').value = preset.primaryOllamaUrl;
-      setSelectValue('primaryModel', preset.primaryModel);
-      document.getElementById('maxImageSize').value = preset.maxImageSize;
-      document.getElementById('fallbackEnabled').checked = preset.fallbackEnabled;
-      document.getElementById('fallbackOllamaUrl').value = preset.fallbackOllamaUrl;
-      setSelectValue('fallbackModel', preset.fallbackModel);
-      document.getElementById('fallbackMaxImageSize').value = preset.fallbackMaxImageSize;
-      document.getElementById('profileSummary').textContent = preset.summary;
-      document.getElementById('profilePreset').value = preset.id;
-      updateFallbackControlState();
-      refreshFallbackPresetSummary();
-      scheduleModelRefresh('primary');
-      scheduleModelRefresh('fallback');
-    }
-
-    function determineFallbackPreset() {
-      return fallbackPresets.find(preset =>
-        preset.fallbackOllamaUrl.trim().toLowerCase() === textValue('fallbackOllamaUrl').trim().toLowerCase()
-        && preset.fallbackModel.trim().toLowerCase() === textValue('fallbackModel').trim().toLowerCase()
-        && Number(preset.fallbackMaxImageSize) === Number(numericValue('fallbackMaxImageSize') ?? 0)
-      ) || null;
-    }
-
-    function refreshFallbackPresetSummary() {
-      const preset = determineFallbackPreset();
-      const presetSelect = document.getElementById('fallbackPreset');
-      const summary = document.getElementById('fallbackPresetSummary');
-      if (preset) {
-        presetSelect.value = preset.id;
-        summary.textContent = preset.summary;
-      } else {
-        presetSelect.value = 'Custom';
-        summary.textContent = 'Custom fallback | Target: edit fallback URL, model, and Max Image Size as needed.';
-      }
-    }
-
-    function applyFallbackPreset(profileId) {
-      if (profileId === 'Custom') {
-        refreshFallbackPresetSummary();
-        return;
-      }
-
-      const preset = findFallbackPresetById(profileId);
-      if (!preset) {
-        refreshFallbackPresetSummary();
-        return;
-      }
-
-      document.getElementById('fallbackEnabled').checked = true;
-      document.getElementById('fallbackOllamaUrl').value = preset.fallbackOllamaUrl;
-      setSelectValue('fallbackModel', preset.fallbackModel);
-      document.getElementById('fallbackMaxImageSize').value = preset.fallbackMaxImageSize;
-      updateFallbackControlState();
-      refreshFallbackPresetSummary();
-      refreshProfileSummary();
-      scheduleModelRefresh('fallback');
-    }
-
-    function setSelectOptions(selectId, models, preferredModel) {
+    function setSelectOptions(selectId, models, preferredModel, includeMissingValue = false) {
       const select = document.getElementById(selectId);
       const currentValue = (select.value || '').trim();
       const uniqueModels = [...new Set((models || []).map(model => (model || '').trim()).filter(Boolean))];
       const fallbackValue = (preferredModel || '').trim() || currentValue;
-      if (fallbackValue && !uniqueModels.some(model => model.toLowerCase() === fallbackValue.toLowerCase())) {
+      if (includeMissingValue && fallbackValue && !uniqueModels.some(model => model.toLowerCase() === fallbackValue.toLowerCase())) {
         uniqueModels.unshift(fallbackValue);
       }
 
@@ -895,12 +720,12 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     }
 
     function setSelectValue(selectId, value) {
-      setSelectOptions(selectId, [value], value);
+      setSelectOptions(selectId, [value], value, true);
     }
 
     function updateFallbackControlState() {
       const enabled = checkboxValue('fallbackEnabled');
-      ['fallbackPreset', 'fallbackOllamaUrl', 'fallbackModel', 'fallbackMaxImageSize'].forEach(id => {
+      ['fallbackOllamaUrl', 'fallbackModel', 'fallbackMaxImageSize'].forEach(id => {
         document.getElementById(id).disabled = !enabled;
       });
 
@@ -919,9 +744,7 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
       const urlFieldId = isFallback ? 'fallbackOllamaUrl' : 'primaryOllamaUrl';
       const modelFieldId = isFallback ? 'fallbackModel' : 'primaryModel';
       const statusFieldId = isFallback ? 'fallbackModelStatus' : 'primaryModelStatus';
-      const defaultModel = isFallback
-        ? (findFallbackPresetById(document.getElementById('fallbackPreset').value)?.fallbackModel || textValue('fallbackModel'))
-        : textValue('primaryModel');
+      const defaultModel = textValue(modelFieldId);
       const baseUrl = textValue(urlFieldId).trim();
       const status = document.getElementById(statusFieldId);
       if (!baseUrl) {
@@ -941,8 +764,13 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         }
 
         const data = await response.json();
-        setSelectOptions(modelFieldId, data.models || [], defaultModel);
-        status.textContent = `${data.models.length} model(s) loaded from ${data.baseUrl}.`;
+        setSelectOptions(modelFieldId, data.models || [], defaultModel, false);
+        const resolvedModels = Array.isArray(data.models) ? data.models : [];
+        const resolvedDefault = (defaultModel || '').trim().toLowerCase();
+        const missingDefault = resolvedDefault && !resolvedModels.some(model => String(model || '').trim().toLowerCase() === resolvedDefault);
+        status.textContent = missingDefault
+          ? `${resolvedModels.length} model(s) loaded from ${data.baseUrl}. Saved selection was not returned by that endpoint.`
+          : `${resolvedModels.length} model(s) loaded from ${data.baseUrl}.`;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         status.textContent = `Unable to load models from ${baseUrl}. ${message}`;
@@ -950,10 +778,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
         return;
       }
 
-      if (isFallback) {
-        refreshFallbackPresetSummary();
-      }
-      refreshProfileSummary();
     }
 
     function scheduleModelRefresh(target) {
@@ -1069,8 +893,6 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     document.getElementById('photoRoot').addEventListener('input', onPhotoRootChanged);
     document.getElementById('fallbackEnabled').addEventListener('change', () => {
       updateFallbackControlState();
-      refreshProfileSummary();
-      refreshFallbackPresetSummary();
       if (checkboxValue('fallbackEnabled')) {
         scheduleModelRefresh('fallback');
       }
@@ -1079,18 +901,10 @@ static string RenderHome(ImmichTaggerSettings settings, ScanJobStatus status)
     document.getElementById('primaryOllamaUrl').addEventListener('blur', () => scheduleModelRefresh('primary'));
     document.getElementById('fallbackOllamaUrl').addEventListener('change', () => scheduleModelRefresh('fallback'));
     document.getElementById('fallbackOllamaUrl').addEventListener('blur', () => scheduleModelRefresh('fallback'));
-    ['primaryOllamaUrl', 'primaryModel', 'maxImageSize', 'fallbackEnabled', 'fallbackOllamaUrl', 'fallbackModel', 'fallbackMaxImageSize']
-      .forEach(id => document.getElementById(id).addEventListener(id === 'fallbackEnabled' ? 'change' : 'input', refreshProfileSummary));
-
     setSelectValue('primaryModel', '{{Encode(settings.PrimaryModel)}}');
     setSelectValue('fallbackModel', '{{Encode(settings.FallbackModel)}}');
     updateFallbackControlState();
     renderSelectedFolders();
-    refreshProfileSummary();
-    refreshFallbackPresetSummary();
-    if (initialProfilePresetId !== 'Custom') {
-      document.getElementById('profilePreset').value = initialProfilePresetId;
-    }
     scheduleModelRefresh('primary');
     if (checkboxValue('fallbackEnabled')) {
       scheduleModelRefresh('fallback');
@@ -1132,24 +946,6 @@ static string RenderProgress(PhotoAiScanProgress? progress)
         </div>
       </div>
 """;
-}
-
-static PhotoAiModelProfile BuildProfileFromSettings(ImmichTaggerSettings settings)
-{
-    return new PhotoAiModelProfile
-    {
-        ProfileId = PhotoAiModelProfileId.Custom,
-        DisplayName = "Custom",
-        OllamaBaseUrl = settings.PrimaryOllamaUrl,
-        Model = settings.PrimaryModel,
-        MaxImageDimensionPixels = settings.MaxImageSize,
-        ModelPreference = settings.FallbackEnabled
-            ? PhotoAiModelPreference.QwenPcWithUnraidFallback
-            : PhotoAiModelPreference.PrimaryOnly,
-        FallbackOllamaBaseUrl = settings.FallbackOllamaUrl,
-        FallbackModel = settings.FallbackModel,
-        FallbackMaxImageDimensionPixels = settings.FallbackMaxImageSize
-    };
 }
 
 static string FormatDuration(TimeSpan duration)
